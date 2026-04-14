@@ -11,14 +11,19 @@
 
 ' --- Sample ---
 GLOBAL wave
-wave = LOAD("amen1.dat")
+wave = LOAD("assets/amen1.dat")
 
 ' --- ASM player interface (globals → accessible as _varname in ASM) ---
-GLOBAL gWaveBase  AS ADDRESS    ' pointer to start of current chunk
-GLOBAL gChunkSize AS INTEGER    ' number of output samples (fixed duration)
-GLOBAL gStepHi    AS BYTE       ' step integer part  (8.8 fixed-pt)
-GLOBAL gStepLo    AS BYTE       ' step fractional part
-GLOBAL gFracAcc   AS BYTE       ' fractional accumulator (reset each chunk)
+' pointer to start of current chunk
+DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
+' number of output samples (fixed duration)   
+DIM gChunkSize AS INTEGER  : GLOBAL gChunkSize
+' step integer part  (8.8 fixed-pt)  
+DIM gStepHi    AS BYTE : GLOBAL gStepHi  
+' step fractional part   
+DIM gStepLo    AS BYTE  : GLOBAL gStepLo 
+' fractional accumulator (reset each chunk)  
+DIM gFracAcc   AS BYTE : GLOBAL gFracAcc
 
 ' Passo 1: fixed step = $0100 = 1.0x (original pitch)
 gStepHi = $01
@@ -105,17 +110,17 @@ CALL init_dac
 ' e.g. play_note[1, 4] = second quarter of the sample
 DO
     ' --- Bar 1 ---
-    play_note[0, 16]    ' sixteenth 0   (micro-slice, thin hit)
+    play_note[0, 16]   
     play_note[0, 16]
     play_note[0, 16]
-    play_note[1, 4]     ' quarter 1
-    play_note[2, 4]     ' quarter 2
+    play_note[1, 4]    
+    play_note[2, 4]    
     play_note[2, 4]
 
-    play_note[3, 4]     ' quarter 3
+    play_note[3, 4]    
     play_note[1, 4]
     play_note[2, 4]
-    play_note[3, 8]     ' eighth 3
+    play_note[3, 8]    
     play_note[3, 8]
 
     play_note[0, 4]
