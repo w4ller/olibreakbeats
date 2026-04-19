@@ -19,7 +19,7 @@
 
 ' --- Sample (raw PCM 8kHz 8-bit unsigned mono) ---
 GLOBAL wave
-wave = LOAD("assets/amen1.dat")
+wave = LOAD("assets/amen150.bin")
 
 ' --- Interfaccia ASM player ---
 ' pointer to start of current chunk
@@ -72,8 +72,8 @@ PCH_LOOP:
         LDA   0,X
         STA   $A7CD
 
-        ; --- delay calibrato (B=72 = ~8kHz su dcmoto/MO6 reale) ---
-        LDB   #72
+        ; --- delay calibrato (B=72 = ~8kHz su dcmoto/MO6 reale IS WRONG!) ---
+        LDB   #24
 PCH_DLY:
         DECB
         BNE   PCH_DLY
@@ -129,48 +129,26 @@ CALL init_dac
 ' I chunk a step $0080 (ottava sotto) suonano piu' gravi.
 DO
     ' --- Bar 1: pattern base con variazioni di pitch ---
-    play_note[0, 16, $01, $00]
-    play_note[0, 16, $01, $00]
-    play_note[0, 16, $02, $00]
-    play_note[1,  4, $01, $00]
-    play_note[2,  4, $01, $00]
-    play_note[2,  4, $01, $80]
+    play_note[0, 1, $01, $00]
+    play_note[0, 1, $01, $00]
 
-    play_note[3,  4, $01, $00]
-    play_note[1,  4, $02, $00]
-    play_note[2,  4, $01, $00]
-    play_note[3,  8, $01, $00]
-    play_note[3,  8, $00, $80]
+    play_note[1, 4, $01, $00]
+    play_note[3, 4, $01, $00]
+    play_note[0, 4, $01, $00]
+    play_note[3, 4, $01, $00]
 
-    play_note[0,  4, $01, $00]
-    play_note[1,  4, $01, $00]
-    play_note[2,  4, $02, $00]
-    play_note[3,  4, $01, $00]
+    play_note[3, 8, $01, $0f]
+    play_note[3, 8, $01, $1f]
+    play_note[3, 8, $01, $30]
+    play_note[3, 8, $01, $35]
 
-    ' --- Bar 2 ---
-    play_note[0,  4, $01, $00]
-    play_note[1,  4, $01, $00]
-    play_note[2,  4, $01, $00]
-    play_note[2,  8, $01, $80]
-    play_note[2,  8, $00, $80]
+    play_note[7, 16, $01, $46]
+    play_note[7, 16, $01, $56]
+    play_note[7, 16, $01, $66]
+    play_note[7, 16, $01, $70]
+    play_note[7, 16, $01, $80]
+    play_note[7, 16, $01, $90]
+    play_note[7, 16, $01, $A0]
+    play_note[7, 16, $01, $C0]
 
-    play_note[0,  4, $01, $00]
-    play_note[1,  4, $02, $00]
-    play_note[2,  4, $01, $00]
-    play_note[3,  4, $01, $00]
-
-    ' --- Bar 3: piu' variazioni ---
-    play_note[0, 16, $01, $00]
-    play_note[0, 16, $02, $00]
-    play_note[0, 16, $01, $00]
-    play_note[0, 16, $02, $00]
-    play_note[1,  4, $01, $00]
-    play_note[2,  4, $01, $00]
-    play_note[2,  4, $01, $80]
-
-    play_note[0,  4, $01, $00]
-    play_note[1,  4, $01, $00]
-    play_note[2,  4, $02, $00]
-    play_note[2,  8, $01, $00]
-    play_note[2,  8, $00, $80]
 LOOP
