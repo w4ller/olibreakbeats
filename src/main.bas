@@ -1,8 +1,10 @@
 ' =============================================================================
-' olibreakbeats — main.bas   v0.4
+' olibreakbeats — main.bas   v0.5
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
 ' Legge i pattern da assets/patterns.bin.
+' Il sample amen150.bin e' caricato BANKED (fuori dalla RAM principale).
+' La copia chunk-by-chunk e' gestita da chunkCopy.bas (tecnica olitracker_2v).
 '
 ' Formato patterns.bin:
 '   byte 0     : N = numero di pattern
@@ -16,21 +18,23 @@
 ' Codici tasti MO6 misurati su dcmoto:
 '   1=$0A  2=$12  3=$1A  4=$22  5=$2A  6=$32
 '   7=$33  8=$2B  9=$23  0=$1B
-'   SPACE=$XX  (aggiungere dopo misurazione)
 ' =============================================================================
 
-' --- Sample (raw PCM 8kHz 8-bit unsigned mono) ---
+' --- Sample nel bank espanso ---
 GLOBAL wave
-wave = LOAD("assets/amen150.bin")
+wave = LOAD("assets/amen150.bin") BANKED
 
-' --- Pattern file ---
+' --- Pattern file (piccolo, rimane in RAM principale) ---
 GLOBAL patFile
 patFile = LOAD("assets/patterns.bin")
 
+' --- Include chunkCopy e buffer ---
+INCLUDE "chunkCopy.bas"
+
 ' --- Globals ---
-DIM nPatterns  AS BYTE    : GLOBAL nPatterns
-DIM curPattern AS BYTE    : GLOBAL curPattern
-DIM gKeyPressed AS BYTE   : GLOBAL gKeyPressed
+DIM nPatterns   AS BYTE    : GLOBAL nPatterns
+DIM curPattern  AS BYTE    : GLOBAL curPattern
+DIM gKeyPressed AS BYTE    : GLOBAL gKeyPressed
 
 ' --- Interfaccia ASM player ---
 DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
@@ -75,7 +79,8 @@ END PROC
 
 ' =============================================================================
 ' PLAY_CHUNK_ASM
-' Emette gChunkSize campioni da gWaveBase al DAC con step 8.8 fixed-point.
+' Emette gChunkSize campioni da gWaveBase (chunkBuf) al DAC.
+' Step 8.8 fixed-point per pitch invariant-duration.
 ' =============================================================================
 PROC play_chunk_asm
     ON CPU6809 BEGIN ASM
@@ -106,11 +111,19 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE
-' Seleziona un chunk e lo suona con lo step (pitch) specificato.
+' 1. Copia il chunk richiesto dal bank al chunkBuf (RAM principale).
+' 2. Suona il chunkBuf via play_chunk_asm.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
-    gChunkSize = SIZE(wave) / chunkDiv
-    gWaveBase  = VARPTR(wave) + (gChunkSize * chunkIdx)
+    DIM cs      AS INTEGER
+    DIM srcAddr AS ADDRESS
+    cs      = SIZE(wave) / chunkDiv
+    srcAddr = VARPTR(wave) + (cs * chunkIdx)
+    ' Copia chunk bank -> RAM principale
+    SYS chunkCopyAddr WITH REG(A)=BANK(wave), REG(B)=defBank, REG(X)=srcAddr, REG(Y)=VARPTR(chunkBuf), REG(U)=cs ON CPU6809
+    ' Player suona dal buffer locale
+    gChunkSize = cs
+    gWaveBase  = VARPTR(chunkBuf)
     gStepHi    = stepHi
     gStepLo    = stepLo
     CALL play_chunk_asm
@@ -156,8 +169,9 @@ END PROC
 
 ' =============================================================================
 ' HANDLE_KEY
-' Mappa i codici tasto MO6 (misurati su dcmoto) al pattern desiderato.
-' Codici: 1=$0A 2=$12 3=$1A 4=$22 5=$2A 6=$32 7=$33 8=$2B 9=$23 0=$1B
+' Mappa i codici tasto MO6 al pattern desiderato.
+' Codici misurati su dcmoto:
+'   1=$0A 2=$12 3=$1A 4=$22 5=$2A 6=$32 7=$33 8=$2B 9=$23
 ' =============================================================================
 PROCEDURE handle_key[k AS BYTE]
     DIM req AS BYTE
@@ -173,7 +187,6 @@ PROCEDURE handle_key[k AS BYTE]
         CASE $2B : req = 8
         CASE $23 : req = 9
         CASE ELSE
-            ' qualsiasi altro tasto: stop
             IF k <> 0 THEN
                 PRINT "Stop."
                 END
@@ -188,7 +201,7 @@ END PROC
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.4"
+PRINT "olibreakbeats v0.5"
 CALL init_dac
 
 nPatterns  = PEEK(VARPTR(patFile))
