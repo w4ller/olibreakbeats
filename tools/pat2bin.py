@@ -16,16 +16,18 @@ Formato CSV (con header obbligatorio, righe # = commenti):
 
 Formato binario output (patterns.bin):
   byte  0       : N = numero di pattern nel file (1..255)
-  byte  1..2    : WORD big-endian, offset assoluto pattern 0
-  byte  3..4    : WORD big-endian, offset assoluto pattern 1
+  byte  1..2    : WORD big-endian, offset assoluto pattern 1
+  byte  3..4    : WORD big-endian, offset assoluto pattern 2
   ...
-  byte  (N*2-1) : ultimo offset
+  byte  N*2-1   : ultimo offset
   --- dati ---
-  ogni pattern  : note da 4 byte ciascuna + terminatore $FF $FF $FF $FF
+  ogni pattern  : note da 4 byte ciascuna, NESSUN terminatore
   ogni nota     : DIV  IDX  STEP_HI  STEP_LO
 
   Offset e' assoluto dall'inizio del file.
   Header size = 1 + N*2 byte.
+  Numero note pattern i = (offset(i+1) - offset(i)) / 4
+  Numero note ultimo    = (file_size   - offset(N)) / 4
 
 Uso:
   python tools/pat2bin.py patterns/patterns.csv assets/patterns.bin
@@ -35,8 +37,7 @@ Uso:
 
 import csv, math, os, sys, argparse, struct
 
-TERMINATOR  = bytes([0xFF, 0xFF, 0xFF, 0xFF])
-VALID_DIVS  = {1, 2, 4, 8, 16, 32, 64}
+VALID_DIVS = {1, 2, 4, 8, 16, 32, 64}
 
 
 def semi_to_step88(semi: int) -> tuple:
@@ -46,7 +47,7 @@ def semi_to_step88(semi: int) -> tuple:
 
 
 def compile_csv(csv_path: str, verbose: bool = False) -> dict:
-    """Legge il CSV e restituisce dict {pattern_id (int): bytes}."""
+    """Legge il CSV e restituisce dict {pattern_id (int): bytes} senza terminatore."""
     patterns = {}
     errors   = []
 
@@ -90,65 +91,65 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
             print(e)
         sys.exit(1)
 
-    return {k: b''.join(v) + TERMINATOR for k, v in sorted(patterns.items())}
+    # Nessun terminatore: solo le note grezze
+    return {k: b''.join(v) for k, v in sorted(patterns.items())}
 
 
 def build_binary(patterns: dict) -> bytes:
     """
     Assembla header + dati in un unico blob binario.
-      byte 0    : N (numero pattern)
-      byte 1..2*N : N × WORD big-endian offset assoluto
-      poi dati pattern in ordine
+      byte 0      : N (numero pattern)
+      byte 1..2*N : N x WORD big-endian offset assoluto
+      poi dati pattern consecutivi, nessun terminatore
     """
-    pat_list   = list(patterns.values())        # gia' ordinati per id
-    n          = len(pat_list)
-    header_size = 1 + n * 2                     # 1 byte N + N * 2 byte offset
+    pat_list    = list(patterns.values())   # gia' ordinati per id
+    n           = len(pat_list)
+    header_size = 1 + n * 2                # 1 byte N + N * 2 byte offset
 
-    # Calcola offset assoluti
     offsets = []
     cur = header_size
     for data in pat_list:
         offsets.append(cur)
         cur += len(data)
 
-    total = cur
-    if total > 65535:
-        print(f"ATTENZIONE: file totale {total} byte supera 65535 — offset WORD potrebbero overflow.")
+    if cur > 65535:
+        print(f"ATTENZIONE: file totale {cur} byte supera 65535 — offset WORD overflow.")
 
-    # Costruisci header
     header = bytes([n])
     for off in offsets:
-        header += struct.pack('>H', off)        # big-endian WORD
+        header += struct.pack('>H', off)    # big-endian WORD
 
     return header + b''.join(pat_list)
 
 
 def dump_binary(blob: bytes):
     """Stampa una decodifica leggibile del file binario."""
+    file_size = len(blob)
     n = blob[0]
-    print(f"\n  Header: {n} pattern, header size = {1 + n*2} byte")
+    header_size = 1 + n * 2
+    print(f"\n  Header: {n} pattern, {header_size} byte")
+
     offsets = []
     for i in range(n):
         off = struct.unpack('>H', blob[1 + i*2 : 3 + i*2])[0]
         offsets.append(off)
-        print(f"  pattern {i+1}: offset ${off:04X} ({off})")
+
+    for i, off in enumerate(offsets):
+        end        = offsets[i+1] if i+1 < n else file_size
+        note_count = (end - off) // 4
+        print(f"  pattern {i+1}: offset ${off:04X}  note={note_count}  byte={end-off}")
 
     print()
     for i, off in enumerate(offsets):
-        end = offsets[i+1] if i+1 < len(offsets) else len(blob)
+        end  = offsets[i+1] if i+1 < n else file_size
         data = blob[off:end]
-        note_count = (len(data) - 4) // 4
-        print(f"  ── pattern {i+1} [{note_count} note] ──")
-        j = 0
-        while j + 3 < len(data):
-            d, idx, shi, slo = data[j], data[j+1], data[j+2], data[j+3]
-            if (d, idx, shi, slo) == (0xFF, 0xFF, 0xFF, 0xFF):
-                print(f"       [terminatore]")
-                break
-            raw = shi * 256 + slo
+        note_count = len(data) // 4
+        print(f"  -- pattern {i+1} [{note_count} note] --")
+        for j in range(note_count):
+            d, idx, shi, slo = data[j*4], data[j*4+1], data[j*4+2], data[j*4+3]
+            raw  = shi * 256 + slo
             semi = round(12 * math.log2(raw / 256)) if raw > 0 else 0
             print(f"       div={d:2d}  idx={idx:2d}  step=${shi:02X}${slo:02X}  semi={semi:+d}")
-            j += 4
 
 
 def main():
@@ -157,14 +158,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    parser.add_argument("csv",     help="File CSV sorgente")
-    parser.add_argument("output",  help="File .bin di output")
+    parser.add_argument("csv",    help="File CSV sorgente")
+    parser.add_argument("output", help="File .bin di output")
     parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--dump",  "-d", action="store_true",
+    parser.add_argument("--dump",    "-d", action="store_true",
                         help="Stampa decodifica del binario prodotto")
     args = parser.parse_args()
 
-    print(f"\npat2bin — {args.csv}\n")
+    print(f"\npat2bin -- {args.csv}\n")
     patterns = compile_csv(args.csv, args.verbose)
     blob     = build_binary(patterns)
 
@@ -172,10 +173,10 @@ def main():
     with open(args.output, 'wb') as f:
         f.write(blob)
 
-    ids = list(patterns.keys())
+    ids         = list(patterns.keys())
     header_size = 1 + len(ids) * 2
     print(f"  Pattern IDs  : {ids}")
-    print(f"  Header       : {header_size} byte")
+    print(f"  Header       : {header_size} byte  (1 + {len(ids)}x2)")
     print(f"  Dati         : {len(blob) - header_size} byte")
     print(f"  Totale       : {len(blob)} byte  ({len(blob)/1024:.2f} KB)")
     print(f"  Output       : {args.output}")
