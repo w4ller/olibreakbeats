@@ -1,42 +1,44 @@
 ' =============================================================================
-' olibreakbeats — main.bas   v0.2  (Passo 2)
+' olibreakbeats — main.bas   v0.3  (Passo 3)
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' ASM core player con step variabile per slot (pitch senza cambiare ritmo).
-' Delay calibrato empiricamente su dcmoto: B=72 → ~8kHz output rate.
+' Legge i pattern da assets/patterns.bin invece di hardcodarli.
 '
-' Nota clock MO6: la CPU 6809 nel Thomson MO6 gira a ~3.58 MHz nominali.
-' Il valore B=72 e' il riferimento calibrato empiricamente — non modificare
-' senza riverificare il pitch su dcmoto.
+' Formato patterns.bin:
+'   byte 0     : N = numero di pattern
+'   byte 1..2  : WORD big-endian offset assoluto pattern 1
+'   byte 3..4  : WORD big-endian offset assoluto pattern 2
+'   ...
+'   poi dati: ogni nota = 4 byte  DIV IDX STEP_HI STEP_LO
+'   nessun terminatore: lunghezza = (offset_next - offset_cur) / 4
 '
-' Step 8.8 fixed-point: parte alta = intera, parte bassa = frazionaria.
-'   $0100 = 1.0x  pitch originale
-'   $0200 = 2.0x  ottava sopra
-'   $0180 = 1.5x  quinta sopra
-'   $0080 = 0.5x  ottava sotto
-'   $00C0 = 0.75x quarta sotto
+' Tasti 1..9 (o quanti pattern ci sono) per switchare pattern al volo.
+' Qualsiasi altro tasto per fermarsi.
 ' =============================================================================
 
 ' --- Sample (raw PCM 8kHz 8-bit unsigned mono) ---
 GLOBAL wave
 wave = LOAD("assets/amen150.bin")
 
+' --- Pattern file ---
+GLOBAL patFile
+patFile = LOAD("assets/patterns.bin")
+
+' --- Numero di pattern letto dall'header ---
+DIM nPatterns  AS BYTE    : GLOBAL nPatterns
+
+' --- Pattern corrente (1-based) ---
+DIM curPattern AS INTEGER : GLOBAL curPattern
+
 ' --- Interfaccia ASM player ---
-' pointer to start of current chunk
 DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
-' number of output samples (fixed duration)
-DIM gChunkSize AS INTEGER  : GLOBAL gChunkSize
-' step integer part  (8.8 fixed-pt)
-DIM gStepHi    AS BYTE : GLOBAL gStepHi
-' step fractional part
-DIM gStepLo    AS BYTE : GLOBAL gStepLo
-' fractional accumulator (reset each chunk)
-DIM gFracAcc   AS BYTE : GLOBAL gFracAcc
+DIM gChunkSize AS INTEGER : GLOBAL gChunkSize
+DIM gStepHi    AS BYTE    : GLOBAL gStepHi
+DIM gStepLo    AS BYTE    : GLOBAL gStepLo
+DIM gFracAcc   AS BYTE    : GLOBAL gFracAcc
 
 ' =============================================================================
 ' INIT_DAC
-' Configura PIA port B bits 0-5 come uscite per il DAC a 6 bit.
-' Da chiamare una sola volta all'avvio.
 ' =============================================================================
 PROC init_dac
     ON CPU6809 BEGIN ASM
@@ -52,15 +54,6 @@ END PROC
 
 ' =============================================================================
 ' PLAY_CHUNK_ASM
-' Emette esattamente gChunkSize campioni da gWaveBase al DAC.
-'
-' Durata   = gChunkSize x T_campione = COSTANTE (Y e' il contatore fisso).
-' Pitch    = determinato da gStepHi.gStepLo (8.8 fixed-point).
-'
-' Aumentare B  → sample rate piu' bassa → tutto piu' lento E piu' grave.
-' Cambiare step → solo pitch, durata slot invariata.
-'
-' Delay calibrato empiricamente su dcmoto: B=72 → ~8kHz.
 ' =============================================================================
 PROC play_chunk_asm
     ON CPU6809 BEGIN ASM
@@ -72,15 +65,11 @@ PCH_LOOP:
         LDA   0,X
         STA   $A7CD
 
-        ; --- delay calibrato (B=72 = ~8kHz su dcmoto/MO6 reale IS WRONG!) ---
         LDB   #24
 PCH_DLY:
         DECB
         BNE   PCH_DLY
 
-        ; --- avanzamento fixed-point 8.8 ---
-        ; gFracAcc += gStepLo  carry -> gStepHi
-        ; X += gStepHi + carry
         LDB   _gFracAcc
         ADDB  _gStepLo
         STB   _gFracAcc
@@ -95,17 +84,7 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE
-' Seleziona un chunk e lo suona con lo step (pitch) specificato.
-'
-'   chunkIdx  : quale fetta suonare (0 ... chunkDiv-1)
-'   chunkDiv  : in quante fette uguali dividere il sample (4, 8, 16)
-'   stepHi    : parte intera dello step 8.8  (es. $01 = 1.0x)
-'   stepLo    : parte frazionaria dello step (es. $00 = .0, $80 = .5)
-'
-' Esempi:
-'   play_note[0, 4, $01, $00]  primo quarto, pitch originale
-'   play_note[1, 4, $02, $00]  secondo quarto, ottava sopra
-'   play_note[2, 8, $00, $80]  terzo ottavo, ottava sotto
+' Suona un chunk del sample con step (pitch) specificato.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
     gChunkSize = SIZE(wave) / chunkDiv
@@ -116,39 +95,78 @@ PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, st
 END PROC
 
 ' =============================================================================
+' PLAY_PATTERN
+' Legge e suona tutte le note del pattern patIdx (1-based) da patFile.
+'
+' Header:  byte 0 = N,  byte 1..2 = offset pat1,  byte 3..4 = offset pat2 ...
+' Offset assoluti dall'inizio del file, big-endian WORD.
+' Numero note = (offset_next - offset_cur) / 4
+' Ultimo pattern: (SIZE(patFile) - offset_cur) / 4
+' =============================================================================
+PROCEDURE play_pattern[patIdx AS BYTE]
+    DIM base     AS ADDRESS
+    DIM offCur   AS INTEGER
+    DIM offNext  AS INTEGER
+    DIM noteCount AS INTEGER
+    DIM noteAddr AS ADDRESS
+    DIM n        AS INTEGER
+    DIM bDiv     AS BYTE
+    DIM bIdx     AS BYTE
+    DIM bStepHi  AS BYTE
+    DIM bStepLo  AS BYTE
+
+    base = VARPTR(patFile)
+
+    ' Leggi offset corrente: header[patIdx] = byte a posizione (patIdx-1)*2 + 1
+    offCur = PEEK(base + 1 + (patIdx - 1) * 2) * 256 + PEEK(base + 2 + (patIdx - 1) * 2)
+
+    ' Leggi offset prossimo (o fine file se ultimo pattern)
+    IF patIdx >= nPatterns THEN
+        offNext = SIZE(patFile)
+    ELSE
+        offNext = PEEK(base + 1 + patIdx * 2) * 256 + PEEK(base + 2 + patIdx * 2)
+    END IF
+
+    noteCount = (offNext - offCur) / 4
+    noteAddr  = base + offCur
+
+    FOR n = 0 TO noteCount - 1
+        bDiv    = PEEK(noteAddr + n * 4)
+        bIdx    = PEEK(noteAddr + n * 4 + 1)
+        bStepHi = PEEK(noteAddr + n * 4 + 2)
+        bStepLo = PEEK(noteAddr + n * 4 + 3)
+        play_note[bIdx, bDiv, bStepHi, bStepLo]
+    NEXT n
+END PROC
+
+' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.2 - Passo 2"
+PRINT "olibreakbeats v0.3"
 CALL init_dac
 
-' --- Pattern breakbeat con pitch variabile ---
-' Notazione: play_note[chunkIndex, nChunk, stepHi, stepLo]
-'
-' I chunk a step $0200 (ottava sopra) suonano piu' acuti ma
-' occupano lo stesso slot temporale.
-' I chunk a step $0080 (ottava sotto) suonano piu' gravi.
+' Leggi numero di pattern dall'header
+nPatterns  = PEEK(VARPTR(patFile))
+curPattern = 1
+
+PRINT "Pattern disponibili: "; nPatterns
+PRINT "Premi 1-"; nPatterns; " per scegliere. Altro tasto = stop."
+
 DO
-    ' --- Bar 1: pattern base con variazioni di pitch ---
-    play_note[0, 1, $01, $00]
-    play_note[0, 1, $01, $00]
+    ' Controlla tasto prima di ogni bar
+    DIM k AS BYTE
+    k = INKEY()
+    IF k >= 49 AND k <= 57 THEN        ' tasti ASCII '1'..'9'
+        DIM req AS BYTE
+        req = k - 48
+        IF req >= 1 AND req <= nPatterns THEN
+            curPattern = req
+            PRINT "Pattern: "; curPattern
+        END IF
+    ELSE IF k > 0 THEN
+        PRINT "Stop."
+        END
+    END IF
 
-    play_note[1, 4, $01, $00]
-    play_note[3, 4, $01, $00]
-    play_note[0, 4, $01, $00]
-    play_note[3, 4, $01, $00]
-
-    play_note[3, 8, $01, $0f]
-    play_note[3, 8, $01, $1f]
-    play_note[3, 8, $01, $30]
-    play_note[3, 8, $01, $35]
-
-    play_note[7, 16, $01, $46]
-    play_note[7, 16, $01, $56]
-    play_note[7, 16, $01, $66]
-    play_note[7, 16, $01, $70]
-    play_note[7, 16, $01, $80]
-    play_note[7, 16, $01, $90]
-    play_note[7, 16, $01, $A0]
-    play_note[7, 16, $01, $C0]
-
+    play_pattern[curPattern]
 LOOP
