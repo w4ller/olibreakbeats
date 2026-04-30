@@ -28,25 +28,25 @@
 
 DIM chunkCopy AS BYTE (18) FOR BANK READ
 
-chunkCopy(0)  = $B7   ' STA $A7E5 (seleziona bank sorgente)
+chunkCopy(0)  = $B7  
 chunkCopy(1)  = $A7
 chunkCopy(2)  = $E5
-chunkCopy(3)  = $A6   ' LDA ,X+
+chunkCopy(3)  = $A6   :' LDA ,X+
 chunkCopy(4)  = $80
-chunkCopy(5)  = $A7   ' STA ,Y+
+chunkCopy(5)  = $A7   :' STA ,Y+
 chunkCopy(6)  = $A0
-chunkCopy(7)  = $33   ' LEAU -1,U
+chunkCopy(7)  = $33   :' LEAU -1,U
 chunkCopy(8)  = $5F
-chunkCopy(9)  = $11   ' CMPU #0
+chunkCopy(9)  = $11   :' CMPU #0
 chunkCopy(10) = $83
 chunkCopy(11) = $00
 chunkCopy(12) = $00
-chunkCopy(13) = $26   ' BNE -12 (torna a LDA ,X+)
+chunkCopy(13) = $26   :' BNE -12 (torna a LDA ,X+)
 chunkCopy(14) = $F4
-chunkCopy(15) = $F7   ' STB $A7E5 (ripristina bank default)
+chunkCopy(15) = $F7   :' STB $A7E5 (ripristina bank default)
 chunkCopy(16) = $A7
 chunkCopy(17) = $E5
-chunkCopy(18) = $39   ' RTS
+chunkCopy(18) = $39   :' RTS
 
 chunkCopyAddr = VARPTR(chunkCopy)
 GLOBAL chunkCopyAddr

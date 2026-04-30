@@ -1,0 +1,42 @@
+{
+    "sourceFile": "src/prove.bas",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 6,
+            "patches": [
+                {
+                    "date": 1777219078569,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                },
+                {
+                    "date": 1777219116433,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,6 +1,6 @@\n+gKeyPressed = 0\n \n-\n DO\n     IF gKeyPressed <> 0 THEN\n \n         PRINT gKeyPressed\n"
+                },
+                {
+                    "date": 1777219159954,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -2,9 +2,9 @@\n \n DO\n     IF gKeyPressed <> 0 THEN\n \n-        PRINT gKeyPressed\n+        PRINT \"KEY PRESSED: \";HEX$(gKeyPressed)\n         gKeyPressed = 0\n     ENDIF\n \n LOOP\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1777219171091,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,4 +1,5 @@\n+CLS\n gKeyPressed = 0\n \n DO\n     IF gKeyPressed <> 0 THEN\n"
+                },
+                {
+                    "date": 1777219274943,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,8 +1,29 @@\n+' =============================================================================\n+'CHECK_INPUT\n+' =============================================================================\n+DIM gKeyPressed AS BYTE : GLOBAL gKeyPressed\n+\n+PROC check_key_swi\n+    ON CPU6809 BEGIN ASM\n+        SWI\n+        FCB   $0C          ; KBSTAT - non bloccante\n+        BCC   CK_NONE      ; C=0 = nessun tasto\n+        STB   _gKeyPressed ; salva ASCII del tasto in variabile ugBASIC\n+        BRA   CK_DONE\n+CK_NONE:\n+        CLR   _gKeyPressed\n+CK_DONE:\n+    END ASM ON CPU6809\n+END PROC\n+\n CLS\n-gKeyPressed = 0\n \n+\n+\n+\n DO\n+    CALL check_key_swi \n     IF gKeyPressed <> 0 THEN\n \n         PRINT \"KEY PRESSED: \";HEX$(gKeyPressed)\n         gKeyPressed = 0\n"
+                },
+                {
+                    "date": 1777489018422,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,32 +1,29 @@\n ' =============================================================================\n-'CHECK_INPUT\n+' keytest.bas  —  mappa completa tasti MO6 via SWI $0C\n ' =============================================================================\n DIM gKeyPressed AS BYTE : GLOBAL gKeyPressed\n \n-PROC check_key_swi\n+PROC check_key\n     ON CPU6809 BEGIN ASM\n         SWI\n-        FCB   $0C          ; KBSTAT - non bloccante\n-        BCC   CK_NONE      ; C=0 = nessun tasto\n-        STB   _gKeyPressed ; salva ASCII del tasto in variabile ugBASIC\n+        FCB   $0C\n+        BCC   CK_NONE\n+        STB   _gKeyPressed\n         BRA   CK_DONE\n CK_NONE:\n         CLR   _gKeyPressed\n CK_DONE:\n     END ASM ON CPU6809\n END PROC\n \n CLS\n+PRINT \"Premi un tasto (ESC o BREAK per uscire)\"\n+PRINT \"\"\n \n-\n-\n-\n DO\n-    CALL check_key_swi \n+    CALL check_key\n     IF gKeyPressed <> 0 THEN\n-\n-        PRINT \"KEY PRESSED: \";HEX$(gKeyPressed)\n+        PRINT \"DEC=\"; gKeyPressed; \"  HEX=$\"; HEX$(gKeyPressed); \"  CHR=\"; CHR$(gKeyPressed)\n         gKeyPressed = 0\n-    ENDIF\n-\n+    END IF\n LOOP\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1777489030316,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -24,6 +24,6 @@\n     CALL check_key\n     IF gKeyPressed <> 0 THEN\n         PRINT \"DEC=\"; gKeyPressed; \"  HEX=$\"; HEX$(gKeyPressed); \"  CHR=\"; CHR$(gKeyPressed)\n         gKeyPressed = 0\n-    END IF\n+    ENDIF\n LOOP\n\\ No newline at end of file\n"
+                }
+            ],
+            "date": 1777219078569,
+            "name": "Commit-0",
+            "content": "\n\nDO\n    IF gKeyPressed <> 0 THEN\n\n        PRINT gKeyPressed\n        gKeyPressed = 0\n    ENDIF\n\nLOOP"
+        }
+    ]
+}

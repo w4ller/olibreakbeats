@@ -21,6 +21,8 @@
 ' =============================================================================
 
 ' --- Sample nel bank espanso ---
+CLS
+' --- Sample ---
 GLOBAL wave
 wave = LOAD("assets/amen150.bin") BANKED
 
@@ -29,7 +31,8 @@ GLOBAL patFile
 patFile = LOAD("assets/patterns.bin")
 
 ' --- Include chunkCopy e buffer ---
-INCLUDE "chunkCopy.bas"
+
+INCLUDE "src/chunkCopy.bas"
 
 ' --- Globals ---
 DIM nPatterns   AS BYTE    : GLOBAL nPatterns
@@ -42,6 +45,17 @@ DIM gChunkSize AS INTEGER : GLOBAL gChunkSize
 DIM gStepHi    AS BYTE    : GLOBAL gStepHi
 DIM gStepLo    AS BYTE    : GLOBAL gStepLo
 DIM gFracAcc   AS BYTE    : GLOBAL gFracAcc
+
+' --- Variabili generative ---
+DIM prev1 AS INTEGER : GLOBAL prev1
+DIM prev2 AS INTEGER : GLOBAL prev2
+DIM prev3 AS INTEGER : GLOBAL prev3
+DIM prev4 AS INTEGER : GLOBAL prev4
+DIM v1 AS INTEGER : GLOBAL v1
+DIM v2 AS INTEGER : GLOBAL v2
+DIM v3 AS INTEGER : GLOBAL v3
+DIM v4 AS INTEGER : GLOBAL v4
+DIM rr AS INTEGER : GLOBAL rr
 
 ' =============================================================================
 ' INIT_DAC
@@ -120,7 +134,8 @@ PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, st
     cs      = SIZE(wave) / chunkDiv
     srcAddr = VARPTR(wave) + (cs * chunkIdx)
     ' Copia chunk bank -> RAM principale
-    SYS chunkCopyAddr WITH REG(A)=BANK(wave), REG(B)=defBank, REG(X)=srcAddr, REG(Y)=VARPTR(chunkBuf), REG(U)=cs ON CPU6809
+    bankWave = VARBANK (wave)
+    SYS chunkCopyAddr WITH REG(A)=bankWave, REG(B)=defBank, REG(X)=srcAddr, REG(Y)=VARPTR(chunkBuf), REG(U)=cs ON CPU6809
     ' Player suona dal buffer locale
     gChunkSize = cs
     gWaveBase  = VARPTR(chunkBuf)
@@ -153,7 +168,7 @@ PROCEDURE play_pattern[patIdx AS BYTE]
         offNext = SIZE(patFile)
     ELSE
         offNext = PEEK(base + 1 + patIdx * 2) * 256 + PEEK(base + 2 + patIdx * 2)
-    END IF
+    ENDIF
 
     noteCount = (offNext - offCur) / 4
     noteAddr  = base + offCur
@@ -190,12 +205,12 @@ PROCEDURE handle_key[k AS BYTE]
             IF k <> 0 THEN
                 PRINT "Stop."
                 END
-            END IF
-    END SELECT
+            ENDIF
+    ENDSELECT
     IF req >= 1 AND req <= nPatterns THEN
         curPattern = req
         PRINT "Pattern: "; curPattern
-    END IF
+    ENDIF
 END PROC
 
 ' =============================================================================
