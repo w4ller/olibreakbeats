@@ -1,47 +1,46 @@
 ' =============================================================================
-' olibreakbeats - main.bas   v0.6
+' olibreakbeats - main.bas   v0.7
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' Entrambi i file asset sono BANKED (fuori dalla RAM principale):
+' Entrambi i file asset sono BANKED:
 '   - amen150.bin  : copiato chunk-by-chunk prima di ogni play_note
 '   - patterns.bin : copiato interamente in patBuf una volta all avvio
+'
+' Fix v0.7:
+'   - := per BANKED LOAD
+'   - VARBANKPTR per indirizzi dentro un bank
+'   - niente REG(U), tutto via variabili globali + PROC ASM
 '
 ' Formato patterns.bin:
 '   byte 0     : N = numero di pattern
 '   byte 1..2  : WORD big-endian offset assoluto pattern 1
 '   byte 3..4  : WORD big-endian offset assoluto pattern 2
-'   ...
-'   poi dati: ogni nota = 4 byte  DIV IDX STEP_HI STEP_LO
+'   poi dati   : ogni nota = 4 byte  DIV IDX STEP_HI STEP_LO
 '
-' Input tastiera via SWI $0C (KBSTAT, non bloccante).
-' Codici tasti MO6 misurati su dcmoto:
+' Codici tasti MO6:
 '   1=$0A  2=$12  3=$1A  4=$22  5=$2A  6=$32
 '   7=$33  8=$2B  9=$23  0=$1B
 ' =============================================================================
 
 CLS
 
-' --- Sample nel bank espanso ---
+' --- Asset BANKED ---
 GLOBAL wave
-wave = LOAD("assets/amen150.bin") BANKED
+wave := LOAD("assets/amen150.bin") BANKED
 
-' --- Pattern file nel bank espanso ---
 GLOBAL patFile
-patFile = LOAD("assets/patterns.bin") BANKED
+patFile := LOAD("assets/patterns.bin") BANKED
 
 ' --- Include chunkCopy e buffer ---
 INCLUDE "src/chunkCopy.bas"
 
-' --- Buffer RAM per patterns.bin (max 512 byte, abbondante) ---
-DIM patBuf AS BYTE (512)
-GLOBAL patBuf
+' --- Buffer RAM per patterns.bin (max 512 byte) ---
+DIM patBuf AS BYTE (512) : GLOBAL patBuf
 
 ' --- Globals ---
 DIM nPatterns   AS BYTE    : GLOBAL nPatterns
 DIM curPattern  AS BYTE    : GLOBAL curPattern
 DIM gKeyPressed AS BYTE    : GLOBAL gKeyPressed
-DIM bankWave    AS BYTE    : GLOBAL bankWave
-DIM bankPat     AS BYTE    : GLOBAL bankPat
 
 ' --- Interfaccia ASM player ---
 DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
@@ -127,11 +126,14 @@ END PROC
 ' Copia chunk bank->chunkBuf, poi suona.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
-    DIM cs      AS INTEGER
-    DIM srcAddr AS ADDRESS
-    cs      = SIZE(wave) / chunkDiv
-    srcAddr = VARPTR(wave) + (cs * chunkIdx)
-    SYS chunkCopyAddr WITH REG(A)=bankWave, REG(B)=defBank, REG(X)=srcAddr, REG(Y)=VARPTR(chunkBuf), REG(U)=cs ON CPU6809
+    DIM cs AS INTEGER
+    cs           = SIZE(wave) / chunkDiv
+    gCopySrcBank = VARBANK(wave)
+    gCopyDefBank = defBank
+    gCopySrc     = VARBANKPTR(wave) + (cs * chunkIdx)
+    gCopyDst     = VARPTR(chunkBuf)
+    gCopyLen     = cs
+    CALL bank_copy
     gChunkSize = cs
     gWaveBase  = VARPTR(chunkBuf)
     gStepHi    = stepHi
@@ -141,7 +143,7 @@ END PROC
 
 ' =============================================================================
 ' PLAY_PATTERN
-' Legge da patBuf (RAM principale, copiato all avvio da patterns.bin BANKED).
+' Legge da patBuf (RAM principale).
 ' =============================================================================
 PROCEDURE play_pattern[patIdx AS BYTE]
     DIM base      AS ADDRESS
@@ -160,7 +162,7 @@ PROCEDURE play_pattern[patIdx AS BYTE]
     offCur = PEEK(base + 1 + (patIdx - 1) * 2) * 256 + PEEK(base + 2 + (patIdx - 1) * 2)
 
     IF patIdx >= nPatterns THEN
-        offNext = SIZE(patFile)
+        offNext = SIZE(patBuf)
     ELSE
         offNext = PEEK(base + 1 + patIdx * 2) * 256 + PEEK(base + 2 + patIdx * 2)
     ENDIF
@@ -208,17 +210,18 @@ END PROC
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.6"
+PRINT "olibreakbeats v0.7"
 CALL init_dac
 
-' Salva i bank number prima di qualsiasi altra operazione
-bankWave = VARBANK(wave)
-bankPat  = VARBANK(patFile)
+' Copia patterns.bin dal bank a patBuf (una volta sola)
+gCopySrcBank = VARBANK(patFile)
+gCopyDefBank = defBank
+gCopySrc     = VARBANKPTR(patFile)
+gCopyDst     = VARPTR(patBuf)
+gCopyLen     = SIZE(patFile)
+CALL bank_copy
 
-' Copia patterns.bin dal bank a patBuf (una volta sola, in RAM principale)
-SYS chunkCopyAddr WITH REG(A)=bankPat, REG(B)=defBank, REG(X)=VARPTR(patFile), REG(Y)=VARPTR(patBuf), REG(U)=SIZE(patFile) ON CPU6809
-
-nPatterns  = PEEK(VARPTR(patBuf)) :' legge N dal buffer locale
+nPatterns  = PEEK(VARPTR(patBuf)) :' N dal buffer locale
 curPattern = 1
 
 PRINT "Pattern: "; nPatterns
