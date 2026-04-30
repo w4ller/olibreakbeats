@@ -1,10 +1,10 @@
 ' =============================================================================
-' olibreakbeats — main.bas   v0.5
+' olibreakbeats - main.bas   v0.6
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' Legge i pattern da assets/patterns.bin.
-' Il sample amen150.bin e' caricato BANKED (fuori dalla RAM principale).
-' La copia chunk-by-chunk e' gestita da chunkCopy.bas (tecnica olitracker_2v).
+' Entrambi i file asset sono BANKED (fuori dalla RAM principale):
+'   - amen150.bin  : copiato chunk-by-chunk prima di ogni play_note
+'   - patterns.bin : copiato interamente in patBuf una volta all avvio
 '
 ' Formato patterns.bin:
 '   byte 0     : N = numero di pattern
@@ -12,7 +12,6 @@
 '   byte 3..4  : WORD big-endian offset assoluto pattern 2
 '   ...
 '   poi dati: ogni nota = 4 byte  DIV IDX STEP_HI STEP_LO
-'   nessun terminatore: lunghezza = (offset_next - offset_cur) / 4
 '
 ' Input tastiera via SWI $0C (KBSTAT, non bloccante).
 ' Codici tasti MO6 misurati su dcmoto:
@@ -20,24 +19,29 @@
 '   7=$33  8=$2B  9=$23  0=$1B
 ' =============================================================================
 
-' --- Sample nel bank espanso ---
 CLS
-' --- Sample ---
+
+' --- Sample nel bank espanso ---
 GLOBAL wave
 wave = LOAD("assets/amen150.bin") BANKED
 
-' --- Pattern file (piccolo, rimane in RAM principale) ---
+' --- Pattern file nel bank espanso ---
 GLOBAL patFile
-patFile = LOAD("assets/patterns.bin")
+patFile = LOAD("assets/patterns.bin") BANKED
 
 ' --- Include chunkCopy e buffer ---
-
 INCLUDE "src/chunkCopy.bas"
+
+' --- Buffer RAM per patterns.bin (max 512 byte, abbondante) ---
+DIM patBuf AS BYTE (512)
+GLOBAL patBuf
 
 ' --- Globals ---
 DIM nPatterns   AS BYTE    : GLOBAL nPatterns
 DIM curPattern  AS BYTE    : GLOBAL curPattern
 DIM gKeyPressed AS BYTE    : GLOBAL gKeyPressed
+DIM bankWave    AS BYTE    : GLOBAL bankWave
+DIM bankPat     AS BYTE    : GLOBAL bankPat
 
 ' --- Interfaccia ASM player ---
 DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
@@ -59,7 +63,6 @@ DIM rr AS INTEGER : GLOBAL rr
 
 ' =============================================================================
 ' INIT_DAC
-' Configura PIA port B bits 0-5 come uscite per il DAC 6-bit.
 ' =============================================================================
 PROC init_dac
     ON CPU6809 BEGIN ASM
@@ -75,8 +78,6 @@ END PROC
 
 ' =============================================================================
 ' CHECK_KEY
-' Legge un tasto in modo non bloccante via SWI $0C (KBSTAT).
-' Risultato in gKeyPressed: 0 = nessun tasto.
 ' =============================================================================
 PROC check_key
     ON CPU6809 BEGIN ASM
@@ -93,8 +94,6 @@ END PROC
 
 ' =============================================================================
 ' PLAY_CHUNK_ASM
-' Emette gChunkSize campioni da gWaveBase (chunkBuf) al DAC.
-' Step 8.8 fixed-point per pitch invariant-duration.
 ' =============================================================================
 PROC play_chunk_asm
     ON CPU6809 BEGIN ASM
@@ -125,18 +124,14 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE
-' 1. Copia il chunk richiesto dal bank al chunkBuf (RAM principale).
-' 2. Suona il chunkBuf via play_chunk_asm.
+' Copia chunk bank->chunkBuf, poi suona.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
     DIM cs      AS INTEGER
     DIM srcAddr AS ADDRESS
     cs      = SIZE(wave) / chunkDiv
     srcAddr = VARPTR(wave) + (cs * chunkIdx)
-    ' Copia chunk bank -> RAM principale
-    bankWave = VARBANK (wave)
     SYS chunkCopyAddr WITH REG(A)=bankWave, REG(B)=defBank, REG(X)=srcAddr, REG(Y)=VARPTR(chunkBuf), REG(U)=cs ON CPU6809
-    ' Player suona dal buffer locale
     gChunkSize = cs
     gWaveBase  = VARPTR(chunkBuf)
     gStepHi    = stepHi
@@ -146,7 +141,7 @@ END PROC
 
 ' =============================================================================
 ' PLAY_PATTERN
-' Legge e suona tutte le note del pattern patIdx (1-based) da patFile.
+' Legge da patBuf (RAM principale, copiato all avvio da patterns.bin BANKED).
 ' =============================================================================
 PROCEDURE play_pattern[patIdx AS BYTE]
     DIM base      AS ADDRESS
@@ -160,7 +155,7 @@ PROCEDURE play_pattern[patIdx AS BYTE]
     DIM bStepHi   AS BYTE
     DIM bStepLo   AS BYTE
 
-    base = VARPTR(patFile)
+    base = VARPTR(patBuf)
 
     offCur = PEEK(base + 1 + (patIdx - 1) * 2) * 256 + PEEK(base + 2 + (patIdx - 1) * 2)
 
@@ -184,9 +179,6 @@ END PROC
 
 ' =============================================================================
 ' HANDLE_KEY
-' Mappa i codici tasto MO6 al pattern desiderato.
-' Codici misurati su dcmoto:
-'   1=$0A 2=$12 3=$1A 4=$22 5=$2A 6=$32 7=$33 8=$2B 9=$23
 ' =============================================================================
 PROCEDURE handle_key[k AS BYTE]
     DIM req AS BYTE
@@ -216,14 +208,21 @@ END PROC
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.5"
+PRINT "olibreakbeats v0.6"
 CALL init_dac
 
-nPatterns  = PEEK(VARPTR(patFile))
+' Salva i bank number prima di qualsiasi altra operazione
+bankWave = VARBANK(wave)
+bankPat  = VARBANK(patFile)
+
+' Copia patterns.bin dal bank a patBuf (una volta sola, in RAM principale)
+SYS chunkCopyAddr WITH REG(A)=bankPat, REG(B)=defBank, REG(X)=VARPTR(patFile), REG(Y)=VARPTR(patBuf), REG(U)=SIZE(patFile) ON CPU6809
+
+nPatterns  = PEEK(VARPTR(patBuf)) :' legge N dal buffer locale
 curPattern = 1
 
-PRINT "Pattern disponibili: "; nPatterns
-PRINT "1-9 = pattern  altro tasto = stop"
+PRINT "Pattern: "; nPatterns
+PRINT "1-9 = pattern  altro = stop"
 
 DO
     CALL check_key
