@@ -1,15 +1,17 @@
 ' =============================================================================
-' olibreakbeats - main.bas   v0.9
+' olibreakbeats - main.bas   v1.0
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' v0.9: buffer ridotto a 256 byte in RAM residente.
-'   play_note copia e suona il chunk in blocchi da 256 byte max.
-'   Sintassi BANK READ: BANK READ VARBANK(src) FROM ptr TO VARPTR(dst) SIZE n
+' v1.0: lettura lazy di patterns.bin.
+'   - All avvio: copia solo header (19 byte) in patHeader
+'   - Al cambio pattern: copia solo le note di quel pattern (max 128 byte)
+'   - Wave: costante 9600 byte, letto a blocchi da 256 byte
 '
 ' Formato patterns.bin:
 '   byte 0     : N = numero di pattern
 '   byte 1..2  : WORD big-endian offset pattern 1
 '   byte 3..4  : WORD big-endian offset pattern 2
+'   ...
 '   poi dati   : ogni nota = 4 byte  DIV IDX STEP_HI STEP_LO
 '
 ' Codici tasti MO6:
@@ -30,9 +32,10 @@ patFile := LOAD("assets/patterns.bin") BANKED
 INCLUDE "src/chunkCopy.bas"
 
 ' --- Globals ---
-DIM nPatterns   AS BYTE    : GLOBAL nPatterns
-DIM curPattern  AS BYTE    : GLOBAL curPattern
-DIM gKeyPressed AS BYTE    : GLOBAL gKeyPressed
+DIM nPatterns    AS BYTE    : GLOBAL nPatterns
+DIM curPattern   AS BYTE    : GLOBAL curPattern
+DIM gKeyPressed  AS BYTE    : GLOBAL gKeyPressed
+DIM patNotesSize AS INTEGER : GLOBAL patNotesSize
 
 ' --- Interfaccia ASM player ---
 DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
@@ -74,7 +77,6 @@ END PROC
 
 ' =============================================================================
 ' PLAY_CHUNK_ASM
-' Suona gChunkSize campioni da gWaveBase con step gStepHi.gStepLo
 ' =============================================================================
 PROC play_chunk_asm
     ON CPU6809 BEGIN ASM
@@ -105,7 +107,7 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE
-' Copia il chunk dal bank a chunkBuf (256B per volta) e suona.
+' Suona un chunk del wave (9600 byte fissi) a blocchi da 256 byte.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
     DIM totalSize AS INTEGER
@@ -113,7 +115,7 @@ PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, st
     DIM remaining AS INTEGER
     DIM blockSize AS INTEGER
 
-    totalSize = SIZE(wave) / chunkDiv
+    totalSize = 9600 / chunkDiv
     srcOff    = VARBANKPTR(wave) + (totalSize * chunkIdx)
     remaining = totalSize
     gStepHi   = stepHi
@@ -135,22 +137,17 @@ PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, st
 END PROC
 
 ' =============================================================================
-' PLAY_PATTERN
-' Legge da patBuf (RAM residente, copiato all avvio).
+' LOAD_PATTERN
+' Copia dal bank solo le note del pattern richiesto in patNotes.
 ' =============================================================================
-PROCEDURE play_pattern[patIdx AS BYTE]
-    DIM base      AS ADDRESS
-    DIM offCur    AS INTEGER
-    DIM offNext   AS INTEGER
-    DIM noteCount AS INTEGER
-    DIM noteAddr  AS ADDRESS
-    DIM n         AS INTEGER
-    DIM bDiv      AS BYTE
-    DIM bIdx      AS BYTE
-    DIM bStepHi   AS BYTE
-    DIM bStepLo   AS BYTE
+PROCEDURE load_pattern[patIdx AS BYTE]
+    DIM base     AS ADDRESS
+    DIM offCur   AS INTEGER
+    DIM offNext  AS INTEGER
+    DIM noteSize AS INTEGER
+    DIM srcOff   AS ADDRESS
 
-    base = VARPTR(patBuf)
+    base = VARPTR(patHeader)
 
     offCur  = PEEK(base + 1 + (patIdx - 1) * 2) * 256 + PEEK(base + 2 + (patIdx - 1) * 2)
 
@@ -160,8 +157,30 @@ PROCEDURE play_pattern[patIdx AS BYTE]
         offNext = PEEK(base + 1 + patIdx * 2) * 256 + PEEK(base + 2 + patIdx * 2)
     ENDIF
 
-    noteCount = (offNext - offCur) / 4
-    noteAddr  = base + offCur
+    noteSize = offNext - offCur
+    IF noteSize > 128 THEN noteSize = 128
+    IF noteSize < 0   THEN noteSize = 0
+
+    srcOff = VARBANKPTR(patFile) + offCur
+    BANK READ VARBANK(patFile) FROM srcOff TO VARPTR(patNotes) SIZE noteSize
+    patNotesSize = noteSize
+END PROC
+
+' =============================================================================
+' PLAY_PATTERN
+' Suona le note gia caricate in patNotes.
+' =============================================================================
+PROCEDURE play_pattern
+    DIM noteAddr  AS ADDRESS
+    DIM noteCount AS INTEGER
+    DIM n         AS INTEGER
+    DIM bDiv      AS BYTE
+    DIM bIdx      AS BYTE
+    DIM bStepHi   AS BYTE
+    DIM bStepLo   AS BYTE
+
+    noteCount = patNotesSize / 4
+    noteAddr  = VARPTR(patNotes)
 
     FOR n = 0 TO noteCount - 1
         bDiv    = PEEK(noteAddr + n * 4)
@@ -195,28 +214,35 @@ PROCEDURE handle_key[k AS BYTE]
             ENDIF
     ENDSELECT
     IF req >= 1 AND req <= nPatterns THEN
-        curPattern = req
-        PRINT "Pattern: "; curPattern
+        IF req <> curPattern THEN
+            curPattern = req
+            load_pattern[curPattern]
+            PRINT "Pattern: "; curPattern
+        ENDIF
     ENDIF
 END PROC
 
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.9"
+PRINT "olibreakbeats v1.0"
 CALL init_dac
 
-' Copia patterns.bin (128 byte max) dal bank a patBuf
-BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(patBuf) SIZE 128
+' Copia solo header di patterns.bin (19 byte)
+BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(patHeader) SIZE 19
 
-nPatterns  = PEEK(VARPTR(patBuf))
+nPatterns  = PEEK(VARPTR(patHeader))
 curPattern = 1
 
 PRINT "patterns: "; nPatterns
+
+' Carica subito il primo pattern
+load_pattern[curPattern]
+
 PRINT "1-9 = pattern  altro = stop"
 
 DO
     CALL check_key
     handle_key[gKeyPressed]
-    play_pattern[curPattern]
+    play_pattern
 LOOP
