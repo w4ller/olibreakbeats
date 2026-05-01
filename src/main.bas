@@ -1,10 +1,10 @@
 ' =============================================================================
-' olibreakbeats - main.bas   v0.8
+' olibreakbeats - main.bas   v0.9
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' v0.8: sostituisce bank_copy ASM con BANK READ nativo ugBASIC.
-'   Sintassi: BANK READ VARBANK(src) FROM VARBANKPTR(src) TO VARPTR(dst) SIZE n
-'   Entrambi i buffer (chunkBuf, patBuf) sono FOR BANK READ -> sotto $6000.
+' v0.9: buffer ridotto a 256 byte in RAM residente.
+'   play_note copia e suona il chunk in blocchi da 256 byte max.
+'   Sintassi BANK READ: BANK READ VARBANK(src) FROM ptr TO VARPTR(dst) SIZE n
 '
 ' Formato patterns.bin:
 '   byte 0     : N = numero di pattern
@@ -40,9 +40,6 @@ DIM gChunkSize AS INTEGER : GLOBAL gChunkSize
 DIM gStepHi    AS BYTE    : GLOBAL gStepHi
 DIM gStepLo    AS BYTE    : GLOBAL gStepLo
 DIM gFracAcc   AS BYTE    : GLOBAL gFracAcc
-
-' --- Variabili generative ---
-DIM rr AS INTEGER : GLOBAL rr
 
 ' =============================================================================
 ' INIT_DAC
@@ -108,19 +105,33 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE
-' Copia chunk wave dal bank a chunkBuf, poi suona.
+' Copia il chunk dal bank a chunkBuf (256B per volta) e suona.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
-    DIM cs      AS INTEGER
-    DIM srcOff  AS ADDRESS
-    cs     = SIZE(wave) / chunkDiv
-    srcOff = VARBANKPTR(wave) + (cs * chunkIdx)
-    BANK READ VARBANK(wave) FROM srcOff TO VARPTR(chunkBuf) SIZE cs
-    gChunkSize = cs
-    gWaveBase  = VARPTR(chunkBuf)
-    gStepHi    = stepHi
-    gStepLo    = stepLo
-    CALL play_chunk_asm
+    DIM totalSize AS INTEGER
+    DIM srcOff    AS ADDRESS
+    DIM remaining AS INTEGER
+    DIM blockSize AS INTEGER
+
+    totalSize = SIZE(wave) / chunkDiv
+    srcOff    = VARBANKPTR(wave) + (totalSize * chunkIdx)
+    remaining = totalSize
+    gStepHi   = stepHi
+    gStepLo   = stepLo
+
+    WHILE remaining > 0
+        IF remaining > 256 THEN
+            blockSize = 256
+        ELSE
+            blockSize = remaining
+        ENDIF
+        BANK READ VARBANK(wave) FROM srcOff TO VARPTR(chunkBuf) SIZE blockSize
+        gChunkSize = blockSize
+        gWaveBase  = VARPTR(chunkBuf)
+        CALL play_chunk_asm
+        srcOff    = srcOff + blockSize
+        remaining = remaining - blockSize
+    WEND
 END PROC
 
 ' =============================================================================
@@ -141,7 +152,7 @@ PROCEDURE play_pattern[patIdx AS BYTE]
 
     base = VARPTR(patBuf)
 
-    offCur = PEEK(base + 1 + (patIdx - 1) * 2) * 256 + PEEK(base + 2 + (patIdx - 1) * 2)
+    offCur  = PEEK(base + 1 + (patIdx - 1) * 2) * 256 + PEEK(base + 2 + (patIdx - 1) * 2)
 
     IF patIdx >= nPatterns THEN
         offNext = SIZE(patFile)
@@ -192,16 +203,16 @@ END PROC
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.8"
+PRINT "olibreakbeats v0.9"
 CALL init_dac
 
-' Copia patterns.bin dal bank a patBuf (una volta sola, all avvio)
-BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(patBuf) SIZE SIZE(patFile)
+' Copia patterns.bin (128 byte max) dal bank a patBuf
+BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(patBuf) SIZE 128
 
-nPatterns  = PEEK(VARPTR(patBuf)) :' N dal buffer locale
+nPatterns  = PEEK(VARPTR(patBuf))
 curPattern = 1
 
-PRINT "pattern: "; nPatterns
+PRINT "patterns: "; nPatterns
 PRINT "1-9 = pattern  altro = stop"
 
 DO

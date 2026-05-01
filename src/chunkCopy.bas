@@ -1,12 +1,10 @@
 ' =============================================================================
-' chunkCopy.bas  -  DEPRECATO in v0.8
-' Sostituito da BANK READ nativo ugBASIC:
-'   BANK READ VARBANK(src) FROM VARBANKPTR(src) TO VARPTR(dst) SIZE n
-' File mantenuto per compatibilita storica.
+' chunkCopy.bas  -  buffer RAM residente per BANK READ
+' v0.9: buffer ridotto a 256 byte per stare in RAM residente MO6
 ' =============================================================================
 
-' Buffer di lavoro: chunk max = 9600/4 = 2400 byte, in RAM residente
-DIM chunkBuf AS BYTE (2400) FOR BANK READ : GLOBAL chunkBuf
+' Buffer wave: 256 byte massimo per blocco
+DIM chunkBuf AS BYTE (256) FOR BANK READ : GLOBAL chunkBuf
 
-' Buffer per patterns.bin, in RAM residente
-DIM patBuf AS BYTE (512) FOR BANK READ : GLOBAL patBuf
+' Buffer patterns.bin: 128 byte (il file e' piccolo)
+DIM patBuf AS BYTE (128) FOR BANK READ : GLOBAL patBuf
