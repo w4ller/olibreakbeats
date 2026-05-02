@@ -2,9 +2,15 @@
 ' olibreakbeats - audio-test branch
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' Test minimalista: legge patterns.bin dall inizio alla fine
-' e suona ogni nota in sequenza, in loop. Zero logica tasti.
-' Buffer wave: 512 byte (max stabile in RAM residente).
+' Player WAV nativo: legge campioni DIRETTAMENTE dal banco espanso
+' senza buffer intermedio chunkBuf e senza BANK READ nel loop audio.
+'
+' Meccanismo bank switch MO6:
+'   STA $A7E5  →  attiva banco (numero in A)
+'   LDA #7
+'   STA $A7E5  →  ripristina banco normale (7)
+'
+' Dopo il bank switch Y punta direttamente ai dati nel map 6809.
 ' =============================================================================
 
 CLS
@@ -15,16 +21,15 @@ wave := LOAD("assets/amen150.bin") BANKED
 GLOBAL patFile
 patFile := LOAD("assets/patterns.bin") BANKED
 
-' --- Buffer RAM residente ---
-DIM chunkBuf AS BYTE (512) FOR BANK READ : GLOBAL chunkBuf
-DIM patBuf   AS BYTE (300) FOR BANK READ : GLOBAL patBuf
+' --- Buffer RAM solo per patterns.bin (letto una volta sola) ---
+DIM patBuf AS BYTE (300) FOR BANK READ : GLOBAL patBuf
 
-' --- Interfaccia ASM player ---
-DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
-DIM gChunkSize AS INTEGER : GLOBAL gChunkSize
-DIM gStepHi    AS BYTE    : GLOBAL gStepHi
-DIM gStepLo    AS BYTE    : GLOBAL gStepLo
-DIM gFracAcc   AS BYTE    : GLOBAL gFracAcc
+' --- Interfaccia ASM player diretto ---
+DIM gWavBank  AS BYTE    : GLOBAL gWavBank   ' numero banco del WAV
+DIM gWavPtr   AS ADDRESS : GLOBAL gWavPtr    ' puntatore assoluto al campione corrente
+DIM gWavCount AS INTEGER : GLOBAL gWavCount  ' numero campioni da suonare
+DIM gStepHi   AS BYTE    : GLOBAL gStepHi    ' parte intera step (fixed 8.8)
+DIM gStepLo   AS BYTE    : GLOBAL gStepLo    ' parte frazionaria step
 
 ' =============================================================================
 ' INIT_DAC
@@ -42,64 +47,69 @@ PROC init_dac
 END PROC
 
 ' =============================================================================
-' PLAY_CHUNK_ASM
+' PLAY_WAV_DIRECT
+' Legge e riproduce campioni DIRETTAMENTE dal banco espanso.
+' Nessuna copia in RAM. Nessun BANK READ nel loop.
+'
+' Usa: gWavBank, gWavPtr, gWavCount, gStepHi, gStepLo
 ' =============================================================================
-PROC play_chunk_asm
+PROC play_wav_direct
     ON CPU6809 BEGIN ASM
-        LDX   _gWaveBase
-        LDY   _gChunkSize
-        CLR   _gFracAcc
+        ORCC  #$50              ; disabilita IRQ e FIRQ
 
-PCH_LOOP:
-        LDA   0,X
-        STA   $A7CD
+        LDY   _gWavPtr          ; Y = indirizzo assoluto primo campione
+        LDU   _gWavCount        ; U = numero campioni da riprodurre
+        CLRB                    ; B = accumulatore frazionario (reset)
 
-        LDB   #24
-PCH_DLY:
-        DECB
-        BNE   PCH_DLY
+        ; Attiva il banco del WAV
+        LDA   _gWavBank
+        STA   $A7E5
 
-        LDB   _gFracAcc
-        ADDB  _gStepLo
-        STB   _gFracAcc
-        LDB   _gStepHi
-        ADCB  #0
-        ABX
+PWDL:
+        LDA   ,Y                ; leggi campione corrente
+        STA   $A7CD             ; manda al DAC MO6
 
-        LEAY  -1,Y
-        BNE   PCH_LOOP
+        ; Timing delay (calibrato per ~9600 Hz a 3.5 MHz)
+        LDA   #24
+PWDL_DLY:
+        DECA
+        BNE   PWDL_DLY
+
+        ; Avanza con step frazionario 8.8
+        ADDB  _gStepLo          ; accFrac += stepLo
+        LDA   _gStepHi
+        ADCA  #0                ; A = stepHi + eventuale carry
+        LEAY  A,Y               ; Y += A (parte intera + carry frac)
+
+        ; Decrementa contatore e loop
+        LEAU  -1,U
+        BNE   PWDL
+
+        ; Ripristina banco normale (7)
+        LDA   #7
+        STA   $A7E5
+
+        ANDCC #$AF              ; riabilita IRQ e FIRQ
     END ASM ON CPU6809
 END PROC
 
 ' =============================================================================
 ' PLAY_NOTE
-' Suona un chunk del wave a blocchi da 512 byte.
+' Calcola gWavPtr e gWavCount, poi chiama play_wav_direct.
+' Nessun loop di blocchi: il player ASM legge tutto in un colpo solo.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
-    DIM totalSize AS INTEGER
-    DIM srcOff    AS ADDRESS
-    DIM remaining AS INTEGER
-    DIM blockSize AS INTEGER
+    DIM totalSamples AS INTEGER
 
-    totalSize = 9600 / chunkDiv
-    srcOff    = VARBANKPTR(wave) + (totalSize * chunkIdx)
-    remaining = totalSize
+    totalSamples = 9600 / chunkDiv
+
+    gWavBank  = VARBANK(wave)
+    gWavPtr   = VARBANKPTR(wave) + (totalSamples * chunkIdx)
+    gWavCount = totalSamples
     gStepHi   = stepHi
     gStepLo   = stepLo
 
-    WHILE remaining > 0
-        IF remaining > 512 THEN
-            blockSize = 512
-        ELSE
-            blockSize = remaining
-        ENDIF
-        BANK READ VARBANK(wave) FROM srcOff TO VARPTR(chunkBuf) SIZE blockSize
-        gChunkSize = blockSize
-        gWaveBase  = VARPTR(chunkBuf)
-        CALL play_chunk_asm
-        srcOff    = srcOff + blockSize
-        remaining = remaining - blockSize
-    WEND
+    CALL play_wav_direct
 END PROC
 
 ' =============================================================================
@@ -108,7 +118,7 @@ END PROC
 PRINT "audio-test"
 CALL init_dac
 
-' Copia tutto patterns.bin in patBuf
+' Copia patterns.bin in patBuf (una volta sola, fuori dal loop audio)
 BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(patBuf) SIZE 300
 
 DIM nPat     AS BYTE    : nPat    = PEEK(VARPTR(patBuf))
