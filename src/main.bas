@@ -1,44 +1,45 @@
 ' =============================================================================
-' olibreakbeats - audio-test branch
+' olibreakbeats — main.bas   v0.2  (Passo 2)
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' Player WAV nativo: legge campioni DIRETTAMENTE dal banco espanso
-' senza buffer intermedio chunkBuf e senza BANK READ nel loop audio.
+' ASM core player con step variabile per slot (pitch senza cambiare ritmo).
+' Delay calibrato empiricamente su dcmoto: B=72 → ~8kHz output rate.
 '
-' Meccanismo bank switch MO6:
-'   STA $A7E5  ->  attiva banco (numero in A)
-'   LDA #7
-'   STA $A7E5  ->  ripristina banco normale (7)
+' Nota clock MO6: la CPU 6809 nel Thomson MO6 gira a ~3.58 MHz nominali.
+' Il valore B=72 e' il riferimento calibrato empiricamente — non modificare
+' senza riverificare il pitch su dcmoto.
 '
-' Dopo il bank switch Y punta direttamente ai dati nel map 6809.
-'
-' Timing 9600 Hz @ 3.546895 MHz:
-'   cicli per campione = 3546895 / 9600 = 369
-'   overhead loop (LDA,STA,ADDB,LDA,ADCA,LEAY,LEAU,BNE) ~ 30 cicli
-'   cicli netti per delay = 369 - 30 = 339
-'   inner loop DECA(2) + BNE(3) = 5 cicli/iter -> 339/5 ~ 68 iterazioni
+' Step 8.8 fixed-point: parte alta = intera, parte bassa = frazionaria.
+'   $0100 = 1.0x  pitch originale
+'   $0200 = 2.0x  ottava sopra
+'   $0180 = 1.5x  quinta sopra
+'   $0080 = 0.5x  ottava sotto
+'   $00C0 = 0.75x quarta sotto
 ' =============================================================================
 
-CLS
 
+' --- Sample (raw PCM 8kHz 8-bit unsigned mono) ---
 GLOBAL wave
-wave := LOAD("assets/amen150.bin") BANKED
+wave = LOAD("assets/amen150.bin")
 
-GLOBAL patFile
-patFile := LOAD("assets/patterns.bin") BANKED
 
-' --- Buffer RAM solo per patterns.bin (letto una volta sola) ---
-DIM patBuf AS BYTE (300) FOR BANK READ : GLOBAL patBuf
+' --- Interfaccia ASM player ---
+' pointer to start of current chunk
+DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
+' number of output samples (fixed duration)
+DIM gChunkSize AS INTEGER  : GLOBAL gChunkSize
+' step integer part  (8.8 fixed-pt)
+DIM gStepHi    AS BYTE : GLOBAL gStepHi
+' step fractional part
+DIM gStepLo    AS BYTE : GLOBAL gStepLo
+' fractional accumulator (reset each chunk)
+DIM gFracAcc   AS BYTE : GLOBAL gFracAcc
 
-' --- Interfaccia ASM player diretto ---
-DIM gWavBank  AS BYTE    : GLOBAL gWavBank   ' numero banco del WAV
-DIM gWavPtr   AS ADDRESS : GLOBAL gWavPtr    ' puntatore assoluto al primo campione
-DIM gWavCount AS INTEGER : GLOBAL gWavCount  ' campioni DAC da emettere
-DIM gStepHi   AS BYTE    : GLOBAL gStepHi    ' parte intera step (fixed 8.8)
-DIM gStepLo   AS BYTE    : GLOBAL gStepLo    ' parte frazionaria step
 
 ' =============================================================================
 ' INIT_DAC
+' Configura PIA port B bits 0-5 come uscite per il DAC a 6 bit.
+' Da chiamare una sola volta all'avvio.
 ' =============================================================================
 PROC init_dac
     ON CPU6809 BEGIN ASM
@@ -52,128 +53,117 @@ PROC init_dac
     END ASM ON CPU6809
 END PROC
 
+
 ' =============================================================================
-' PLAY_WAV_DIRECT
-' Legge e riproduce campioni DIRETTAMENTE dal banco espanso.
-' Nessuna copia in RAM. Nessun BANK READ nel loop.
+' PLAY_CHUNK_ASM
+' Emette esattamente gChunkSize campioni da gWaveBase al DAC.
 '
-' Usa: gWavBank, gWavPtr, gWavCount, gStepHi, gStepLo
+' Durata   = gChunkSize x T_campione = COSTANTE (Y e' il contatore fisso).
+' Pitch    = determinato da gStepHi.gStepLo (8.8 fixed-point).
 '
-' gWavCount = numero campioni DAC da emettere (gia calcolato tenendo
-'             conto dello step, cosi Y non sfora mai oltre la fine del WAV)
+' Aumentare B  -> sample rate piu' bassa -> tutto piu' lento E piu' grave.
+' Cambiare step -> solo pitch, durata slot invariata.
+'
+' Delay calibrato empiricamente su dcmoto: B=72 -> ~8kHz.
 ' =============================================================================
-PROC play_wav_direct
+PROC play_chunk_asm
     ON CPU6809 BEGIN ASM
-        ORCC  #$50              ; disabilita IRQ e FIRQ
+        LDX   _gWaveBase
+        LDY   _gChunkSize
+        CLR   _gFracAcc
 
-        LDY   _gWavPtr          ; Y = indirizzo assoluto primo campione
-        LDU   _gWavCount        ; U = campioni DAC da emettere
-        CLRB                    ; B = accumulatore frazionario (reset)
 
-        ; Attiva il banco del WAV
-        LDA   _gWavBank
-        STA   $A7E5
+PCH_LOOP:
+        LDA   0,X
+        STA   $A7CD
 
-PWDL:
-        LDA   ,Y                ; leggi campione dal banco
-        STA   $A7CD             ; manda al DAC MO6
 
-        ; Delay calibrato: 68 iter x 5 cicli = 340 + ~30 overhead = ~370 cicli
-        ; -> 3546895 / 370 ~ 9586 Hz (errore <0.2% su 9600 Hz)
-        LDA   #68
-PWDL_DLY:
-        DECA
-        BNE   PWDL_DLY
+        ; --- delay calibrato (B=24) ---
+        LDB   #24
+PCH_DLY:
+        DECB
+        BNE   PCH_DLY
 
-        ; Avanza Y con step frazionario 8.8
-        ; accFrac += stepLo; carry si somma a stepHi
+
+        ; --- avanzamento fixed-point 8.8 ---
+        ; gFracAcc += gStepLo  carry -> gStepHi
+        ; X += gStepHi + carry
+        LDB   _gFracAcc
         ADDB  _gStepLo
-        LDA   _gStepHi
-        ADCA  #0                ; A = stepHi + carry frazionario
-        LEAY  A,Y               ; Y += A campioni reali
+        STB   _gFracAcc
+        LDB   _gStepHi
+        ADCB  #0
+        ABX
 
-        ; Decrementa contatore campioni DAC
-        LEAU  -1,U
-        BNE   PWDL
 
-        ; Ripristina banco normale (7)
-        LDA   #7
-        STA   $A7E5
-
-        ANDCC #$AF              ; riabilita IRQ e FIRQ
+        LEAY  -1,Y
+        BNE   PCH_LOOP
     END ASM ON CPU6809
 END PROC
 
+
 ' =============================================================================
 ' PLAY_NOTE
-' Calcola gWavPtr e gWavCount, poi chiama play_wav_direct.
+' Seleziona un chunk e lo suona con lo step (pitch) specificato.
 '
-' gWavCount = campioni DAC da emettere, NON campioni reali letti.
-' Con step > 1 ogni campione DAC avanza Y di piu di 1,
-' quindi: dacCount = totalSamples_reali / step
-'       = (totalSamples * 256) / (stepHi*256 + stepLo)
-' Cio garantisce che Y non sfori mai oltre la fine del chunk WAV.
+'   chunkIdx  : quale fetta suonare (0 ... chunkDiv-1)
+'   chunkDiv  : in quante fette uguali dividere il sample (4, 8, 16)
+'   stepHi    : parte intera dello step 8.8  (es. $01 = 1.0x)
+'   stepLo    : parte frazionaria dello step (es. $00 = .0, $80 = .5)
+'
+' Esempi:
+'   play_note[0, 4, $01, $00]  primo quarto, pitch originale
+'   play_note[1, 4, $02, $00]  secondo quarto, ottava sopra
+'   play_note[2, 8, $00, $80]  terzo ottavo, ottava sotto
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
-    DIM totalSamples AS INTEGER
-    DIM step256      AS INTEGER
-
-    totalSamples = 9600 / chunkDiv
-
-    gWavBank = VARBANK(wave)
-    gWavPtr  = VARBANKPTR(wave) + (totalSamples * chunkIdx)
-    gStepHi  = stepHi
-    gStepLo  = stepLo
-
-    ' Calcola quanti campioni DAC emettere senza sforare il chunk
-    ' step256 = step in virgola fissa 8.8 (es. 1.5 -> 1*256+128 = 384)
-    step256   = stepHi * 256 + stepLo
-    IF step256 = 0 THEN step256 = 256   ' sicurezza: step minimo = 1.0
-    gWavCount = (totalSamples * 256) / step256
-
-    CALL play_wav_direct
+    gChunkSize = SIZE(wave) / chunkDiv
+    gWaveBase  = VARPTR(wave) + (gChunkSize * chunkIdx)
+    gStepHi    = stepHi
+    gStepLo    = stepLo
+    CALL play_chunk_asm
 END PROC
 
+
 ' =============================================================================
-' Main: legge tutto patterns.bin e suona ogni nota in loop
+' Main
 ' =============================================================================
-PRINT "audio-test"
+PRINT "olibreakbeats v0.2 - Passo 2"
 CALL init_dac
 
-' Copia patterns.bin in patBuf (una volta sola, fuori dal loop audio)
-BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(patBuf) SIZE 300
 
-DIM nPat     AS BYTE    : nPat    = PEEK(VARPTR(patBuf))
-DIM noteAddr AS ADDRESS : noteAddr = VARPTR(patBuf)
-DIM fileSize AS INTEGER : fileSize = SIZE(patFile)
-
-PRINT "nPat     : "; nPat
-PRINT "fileSize : "; fileSize
-
-' Calcola offset primo pattern (byte 1..2 big-endian)
-DIM dataStart AS INTEGER
-dataStart = PEEK(noteAddr + 1) * 256 + PEEK(noteAddr + 2)
-PRINT "dataStart: "; dataStart
-
-' Numero totale di note nel file
-DIM totalNotes AS INTEGER
-totalNotes = (fileSize - dataStart) / 4
-PRINT "totNotes : "; totalNotes
-
-DIM n       AS INTEGER
-DIM bDiv    AS BYTE
-DIM bIdx    AS BYTE
-DIM bStepHi AS BYTE
-DIM bStepLo AS BYTE
-DIM addr    AS ADDRESS
-
+' --- Pattern breakbeat con pitch variabile ---
+' Notazione: play_note[chunkIndex, nChunk, stepHi, stepLo]
+'
+' I chunk a step $0200 (ottava sopra) suonano piu' acuti ma
+' occupano lo stesso slot temporale.
+' I chunk a step $0080 (ottava sotto) suonano piu' gravi.
 DO
-    FOR n = 0 TO totalNotes - 1
-        addr    = noteAddr + dataStart + n * 4
-        bDiv    = PEEK(addr)
-        bIdx    = PEEK(addr + 1)
-        bStepHi = PEEK(addr + 2)
-        bStepLo = PEEK(addr + 3)
-        play_note[bIdx, bDiv, bStepHi, bStepLo]
-    NEXT n
+    ' --- Bar 1: pattern base con variazioni di pitch ---
+    play_note[0, 1, $01, $00]
+    play_note[0, 1, $01, $00]
+
+
+    play_note[1, 4, $01, $00]
+    play_note[3, 4, $01, $00]
+    play_note[0, 4, $01, $00]
+    play_note[3, 4, $01, $00]
+
+
+    play_note[3, 8, $01, $0f]
+    play_note[3, 8, $01, $1f]
+    play_note[3, 8, $01, $30]
+    play_note[3, 8, $01, $35]
+
+
+    play_note[7, 16, $01, $46]
+    play_note[7, 16, $01, $56]
+    play_note[7, 16, $01, $66]
+    play_note[7, 16, $01, $70]
+    play_note[7, 16, $01, $80]
+    play_note[7, 16, $01, $90]
+    play_note[7, 16, $01, $A0]
+    play_note[7, 16, $01, $C0]
+
+
 LOOP
