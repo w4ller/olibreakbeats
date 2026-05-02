@@ -5,16 +5,16 @@
 GLOBAL patFile
 patFile := LOAD("assets/patterns.bin") BANKED
 
-' Variabili in RAM sicura (sotto $6000) - non sovrascritte dal bank swap
+' Variabili in RAM sicura (sotto $6000)
 DIM gPatBank  (1) AS BYTE FOR BANK READ : GLOBAL gPatBank
-DIM gPatPtr   (1) AS BYTE FOR BANK READ : GLOBAL gPatPtr  : ' ADDRESS = 2 byte, usiamo array(2)
+DIM gPatPtr   (2) AS BYTE FOR BANK READ : GLOBAL gPatPtr   : ' ADDRESS hi/lo
 DIM gNoteDiv  (1) AS BYTE FOR BANK READ : GLOBAL gNoteDiv
 DIM gNoteIdx  (1) AS BYTE FOR BANK READ : GLOBAL gNoteIdx
 DIM gNoteShi  (1) AS BYTE FOR BANK READ : GLOBAL gNoteShi
 DIM gNoteSlo  (1) AS BYTE FOR BANK READ : GLOBAL gNoteSlo
 
 ' =============================================================================
-' READ_NOTE_ASM - legge 4 byte da gPatPtr nel banco gPatBank
+' READ_NOTE_ASM
 ' =============================================================================
 PROC read_note_asm
     ON CPU6809 BEGIN ASM
@@ -36,9 +36,10 @@ END PROC
 
 ' --- Setup ---
 gPatBank(0) = VARBANK(patFile)
-
-' --- Leggi byte 0..3 (header: N, off_hi, off_lo, _) ---
-gPatPtr(0) = VARBANKPTR(patFile)
+DIM tmp AS ADDRESS
+tmp        = VARBANKPTR(patFile)
+gPatPtr(0) = tmp / 256
+gPatPtr(1) = tmp AND $FF
 CALL read_note_asm
 
 DIM nPat       AS BYTE    : nPat       = gNoteDiv(0)
@@ -56,10 +57,11 @@ PRINT "pat1Off : "; pat1Off
 PRINT "nNotes  : "; totalNotes
 PRINT ""
 
-' --- Stampa ogni nota ---
 DIM n AS INTEGER
 FOR n = 0 TO totalNotes - 1
-    gPatPtr(0) = basePtr + n * 4
+    tmp        = basePtr + n * 4
+    gPatPtr(0) = tmp / 256
+    gPatPtr(1) = tmp AND $FF
     CALL read_note_asm
     PRINT n; ": div="; gNoteDiv(0); " idx="; gNoteIdx(0); " shi="; gNoteShi(0); " slo="; gNoteSlo(0)
 NEXT n

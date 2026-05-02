@@ -1,16 +1,12 @@
 ' =============================================================================
-' olibreakbeats - main.bas   v0.7  (Passo 6)
+' olibreakbeats - main.bas   v0.8  (Passo 6 fix)
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' v0.7: patterns.bin letto DIRETTAMENTE dal banco via ASM.
-' Tutte le variabili interfaccia ASM dichiarate FOR BANK READ
-' (sotto $6000) per evitare corruzione da bank swap.
-'
-' Struttura patterns.bin:
-'   byte 0      : N pattern
-'   byte 1..2   : offset assoluto pattern 1 (WORD big-endian)
-'   dati        : note da 4 byte: DIV IDX STEP_HI STEP_LO
-'                 IDX=$FF = chunk casuale a runtime
+' v0.8: fix dichiarazioni FOR BANK READ.
+' Variabili a 2 byte (ADDRESS/INTEGER) -> DIM x(2) AS BYTE FOR BANK READ
+' x(0)=hi x(1)=lo, contigui, big-endian come si aspetta LDX/LDY su 6809.
+' Variabili a 1 byte                   -> DIM x(1) AS BYTE FOR BANK READ
+' Tutte sotto $6000, sicure da bank swap.
 ' =============================================================================
 
 
@@ -22,9 +18,9 @@ GLOBAL patFile
 patFile := LOAD("assets/patterns.bin") BANKED
 
 
-' --- Interfaccia ASM player WAV (sotto $6000, sicure da bank swap) ---
-DIM gWaveBase  (1) AS BYTE FOR BANK READ : GLOBAL gWaveBase  : ' ADDRESS 2 byte
-DIM gChunkSize (1) AS BYTE FOR BANK READ : GLOBAL gChunkSize : ' INTEGER 2 byte
+' --- Interfaccia ASM player WAV (sotto $6000) ---
+DIM gWaveBase  (2) AS BYTE FOR BANK READ : GLOBAL gWaveBase  : ' ADDRESS hi/lo
+DIM gChunkSize (2) AS BYTE FOR BANK READ : GLOBAL gChunkSize : ' INTEGER hi/lo
 DIM gStepHi    (1) AS BYTE FOR BANK READ : GLOBAL gStepHi
 DIM gStepLo    (1) AS BYTE FOR BANK READ : GLOBAL gStepLo
 DIM gFracAcc   (1) AS BYTE FOR BANK READ : GLOBAL gFracAcc
@@ -32,7 +28,7 @@ DIM gWavBank   (1) AS BYTE FOR BANK READ : GLOBAL gWavBank
 
 ' --- Interfaccia ASM lettura pattern (sotto $6000) ---
 DIM gPatBank   (1) AS BYTE FOR BANK READ : GLOBAL gPatBank
-DIM gPatPtr    (1) AS BYTE FOR BANK READ : GLOBAL gPatPtr
+DIM gPatPtr    (2) AS BYTE FOR BANK READ : GLOBAL gPatPtr    : ' ADDRESS hi/lo
 DIM gNoteDiv   (1) AS BYTE FOR BANK READ : GLOBAL gNoteDiv
 DIM gNoteIdx   (1) AS BYTE FOR BANK READ : GLOBAL gNoteIdx
 DIM gNoteShi   (1) AS BYTE FOR BANK READ : GLOBAL gNoteShi
@@ -57,8 +53,8 @@ END PROC
 
 ' =============================================================================
 ' READ_NOTE_ASM
-' Legge 4 byte da gPatPtr(0) nel banco gPatBank(0).
-' Risultati in gNoteDiv(0), gNoteIdx(0), gNoteShi(0), gNoteSlo(0).
+' Legge 4 byte da gPatPtr nel banco gPatBank.
+' Risultati in gNoteDiv, gNoteIdx, gNoteShi, gNoteSlo.
 ' =============================================================================
 PROC read_note_asm
     ON CPU6809 BEGIN ASM
@@ -122,16 +118,22 @@ END PROC
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE]
     DIM actualIdx AS BYTE
+    DIM addr      AS ADDRESS
+    DIM sz        AS INTEGER
     IF chunkIdx = $FF THEN
-        actualIdx = RND(chunkDiv) : ' 0..chunkDiv-1
+        actualIdx = RND(chunkDiv)
     ELSE
-        actualIdx = chunkIdx : ' indice fisso
+        actualIdx = chunkIdx
     ENDIF
-    gChunkSize(0) = 9600 / chunkDiv
-    gWaveBase(0)  = VARBANKPTR(wave) + (gChunkSize(0) * actualIdx)
-    gWavBank(0)   = VARBANK(wave)
-    gStepHi(0)    = stepHi
-    gStepLo(0)    = stepLo
+    sz             = 9600 / chunkDiv
+    gChunkSize(0)  = sz / 256
+    gChunkSize(1)  = sz AND $FF
+    addr           = VARBANKPTR(wave) + (sz * actualIdx)
+    gWaveBase(0)   = addr / 256
+    gWaveBase(1)   = addr AND $FF
+    gWavBank(0)    = VARBANK(wave)
+    gStepHi(0)     = stepHi
+    gStepLo(0)     = stepLo
     CALL play_chunk_asm
 END PROC
 
@@ -141,8 +143,11 @@ END PROC
 ' =============================================================================
 CALL init_dac
 
+' --- Leggi header patterns.bin ---
 gPatBank(0) = VARBANK(patFile)
-gPatPtr(0)  = VARBANKPTR(patFile)
+DIM tmp     AS ADDRESS : tmp = VARBANKPTR(patFile)
+gPatPtr(0)  = tmp / 256
+gPatPtr(1)  = tmp AND $FF
 CALL read_note_asm
 
 DIM nPat       AS BYTE    : nPat       = gNoteDiv(0)
@@ -157,7 +162,9 @@ DIM n AS INTEGER
 
 DO
     FOR n = 0 TO totalNotes - 1
-        gPatPtr(0) = basePtr + n * 4
+        tmp        = basePtr + n * 4
+        gPatPtr(0) = tmp / 256
+        gPatPtr(1) = tmp AND $FF
         CALL read_note_asm
         play_note[gNoteIdx(0), gNoteDiv(0), gNoteShi(0), gNoteSlo(0)]
     NEXT n
