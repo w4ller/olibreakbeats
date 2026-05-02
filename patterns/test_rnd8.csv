@@ -1,0 +1,11 @@
+# test_rnd8.csv — pattern singolo: un ottavo con chunk casuale, pitch originale
+# equivale a: play_note[$FF, 8, $01, $00]  in loop
+#
+# idx=255 = RND: il player sceglie un chunk casuale tra 0..div-1 a runtime
+#
+pattern,div,idx,semi
+1,8,255,0
+1,16,255,0
+1,16,255,0
+1,16,255,0
+1,16,255,0

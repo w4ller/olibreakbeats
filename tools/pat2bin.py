@@ -11,7 +11,7 @@ Formato CSV (con header obbligatorio, righe # = commenti):
 
   pattern : ID numerico, qualsiasi ordine, qualsiasi valore >= 1
   div     : 1 2 4 8 16 32 64
-  idx     : 0 .. div-1
+  idx     : 0 .. div-1  oppure 255 (= RND: chunk casuale a runtime)
   semi    : -24 .. +24
 
 Formato binario output (patterns.bin):
@@ -23,6 +23,8 @@ Formato binario output (patterns.bin):
   --- dati ---
   ogni pattern  : note da 4 byte ciascuna, NESSUN terminatore
   ogni nota     : DIV  IDX  STEP_HI  STEP_LO
+
+  IDX = 255 ($FF) = chunk casuale scelto a runtime tra 0..DIV-1.
 
   Offset e' assoluto dall'inizio del file.
   Header size = 1 + N*2 byte.
@@ -38,6 +40,7 @@ Uso:
 import csv, math, os, sys, argparse, struct
 
 VALID_DIVS = {1, 2, 4, 8, 16, 32, 64}
+IDX_RANDOM = 255   # valore speciale: chunk casuale a runtime
 
 
 def semi_to_step88(semi: int) -> tuple:
@@ -72,7 +75,8 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
             if div not in VALID_DIVS:
                 errors.append(f"  riga {lineno}: div={div} non valido {sorted(VALID_DIVS)}")
                 continue
-            if not (0 <= idx < div):
+            # idx=255 e' sempre valido (RND); altrimenti deve essere 0..div-1
+            if idx != IDX_RANDOM and not (0 <= idx < div):
                 errors.append(f"  riga {lineno}: idx={idx} fuori range 0..{div-1} per div={div}")
                 continue
             if not (-24 <= semi <= 24):
@@ -80,8 +84,9 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
                 continue
 
             shi, slo = semi_to_step88(semi)
+            idx_str  = "RND" if idx == IDX_RANDOM else str(idx)
             if verbose:
-                print(f"  pat={pat_id} div={div:2d} idx={idx:2d} semi={semi:+3d} "
+                print(f"  pat={pat_id} div={div:2d} idx={idx_str:>3} semi={semi:+3d} "
                       f"-> ${shi:02X}${slo:02X} ({2**(semi/12):.4f}x)")
             patterns.setdefault(pat_id, []).append(bytes([div, idx, shi, slo]))
 
@@ -91,7 +96,6 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
             print(e)
         sys.exit(1)
 
-    # Nessun terminatore: solo le note grezze
     return {k: b''.join(v) for k, v in sorted(patterns.items())}
 
 
@@ -102,9 +106,9 @@ def build_binary(patterns: dict) -> bytes:
       byte 1..2*N : N x WORD big-endian offset assoluto
       poi dati pattern consecutivi, nessun terminatore
     """
-    pat_list    = list(patterns.values())   # gia' ordinati per id
+    pat_list    = list(patterns.values())
     n           = len(pat_list)
-    header_size = 1 + n * 2                # 1 byte N + N * 2 byte offset
+    header_size = 1 + n * 2
 
     offsets = []
     cur = header_size
@@ -117,7 +121,7 @@ def build_binary(patterns: dict) -> bytes:
 
     header = bytes([n])
     for off in offsets:
-        header += struct.pack('>H', off)    # big-endian WORD
+        header += struct.pack('>H', off)
 
     return header + b''.join(pat_list)
 
@@ -147,9 +151,10 @@ def dump_binary(blob: bytes):
         print(f"  -- pattern {i+1} [{note_count} note] --")
         for j in range(note_count):
             d, idx, shi, slo = data[j*4], data[j*4+1], data[j*4+2], data[j*4+3]
-            raw  = shi * 256 + slo
-            semi = round(12 * math.log2(raw / 256)) if raw > 0 else 0
-            print(f"       div={d:2d}  idx={idx:2d}  step=${shi:02X}${slo:02X}  semi={semi:+d}")
+            raw     = shi * 256 + slo
+            semi    = round(12 * math.log2(raw / 256)) if raw > 0 else 0
+            idx_str = "RND" if idx == IDX_RANDOM else str(idx)
+            print(f"       div={d:2d}  idx={idx_str:>3}  step=${shi:02X}${slo:02X}  semi={semi:+d}")
 
 
 def main():
