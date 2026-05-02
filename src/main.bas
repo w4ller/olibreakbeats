@@ -1,51 +1,63 @@
 ' =============================================================================
-' olibreakbeats - main.bas   v1.0
-' Thomson MO6 / UGBasic / Motorola 6809
+' olibreakbeats - main.bas   v0.8
+' Thomson MO6 / ugBASIC / Motorola 6809
 '
-' v1.0: lettura lazy di patterns.bin.
-'   - All avvio: copia solo header (19 byte) in patHeader
-'   - Al cambio pattern: copia solo le note di quel pattern (max 128 byte)
-'   - Wave: costante 9600 byte, letto a blocchi da 256 byte
+' Pattern-driven generative breakbeat player.
+' Reads patterns.bin directly from banked RAM via ASM (no buffer).
 '
-' Formato patterns.bin:
-'   byte 0     : N = numero di pattern
-'   byte 1..2  : WORD big-endian offset pattern 1
-'   byte 3..4  : WORD big-endian offset pattern 2
+' *** IMPORTANT - BANK SWAP MEMORY RULE ***
+' Any variable read or written during a bank swap MUST live below $6000.
+' The region $6000-$7FFF is the banked window: switching banks remaps it,
+' corrupting any variables stored there.
+' Rule:
+'   1-byte vars  -> DIM x(1) AS BYTE FOR BANK READ : GLOBAL x
+'   2-byte vars  -> DIM x(2) AS BYTE FOR BANK READ : GLOBAL x  (hi=x(0), lo=x(1))
+' All ASM interface globals below follow this rule.
+'
+' patterns.bin format:
+'   byte 0        : N = number of patterns (1..255)
+'   byte 1..2     : absolute offset of pattern 1 (big-endian WORD)
+'   byte 3..4     : absolute offset of pattern 2 (if N>1)
 '   ...
-'   poi dati   : ogni nota = 4 byte  DIV IDX STEP_HI STEP_LO
+'   data section  : notes, 4 bytes each: DIV  IDX  STEP_HI  STEP_LO
+'                   IDX=$FF = random chunk (0..DIV-1) chosen at runtime
 '
-' Codici tasti MO6:
-'   1=$0A  2=$12  3=$1A  4=$22  5=$2A  6=$32
-'   7=$33  8=$2B  9=$23  0=$1B
+' Step 8.8 fixed-point pitch:
+'   $0100 = 1.0x  original pitch
+'   $0200 = 2.0x  octave up
+'   $0180 = 1.5x  fifth up
+'   $0080 = 0.5x  octave down
 ' =============================================================================
 
-CLS
 
-' --- Asset BANKED ---
+' --- Banked assets ---
 GLOBAL wave
 wave := LOAD("assets/amen150.bin") BANKED
 
 GLOBAL patFile
 patFile := LOAD("assets/patterns.bin") BANKED
 
-' --- Buffer in RAM residente (sotto $6000) ---
-INCLUDE "src/chunkCopy.bas"
 
-' --- Globals ---
-DIM nPatterns    AS BYTE    : GLOBAL nPatterns
-DIM curPattern   AS BYTE    : GLOBAL curPattern
-DIM gKeyPressed  AS BYTE    : GLOBAL gKeyPressed
-DIM patNotesSize AS INTEGER : GLOBAL patNotesSize
+' --- WAV player ASM interface (all below $6000, safe from bank swap) ---
+DIM gWaveBase  (2) AS BYTE FOR BANK READ : GLOBAL gWaveBase  : ' ADDRESS hi/lo
+DIM gChunkSize (2) AS BYTE FOR BANK READ : GLOBAL gChunkSize : ' INTEGER hi/lo
+DIM gStepHi    (1) AS BYTE FOR BANK READ : GLOBAL gStepHi
+DIM gStepLo    (1) AS BYTE FOR BANK READ : GLOBAL gStepLo
+DIM gFracAcc   (1) AS BYTE FOR BANK READ : GLOBAL gFracAcc
+DIM gWavBank   (1) AS BYTE FOR BANK READ : GLOBAL gWavBank
 
-' --- Interfaccia ASM player ---
-DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
-DIM gChunkSize AS INTEGER : GLOBAL gChunkSize
-DIM gStepHi    AS BYTE    : GLOBAL gStepHi
-DIM gStepLo    AS BYTE    : GLOBAL gStepLo
-DIM gFracAcc   AS BYTE    : GLOBAL gFracAcc
+' --- Pattern reader ASM interface (all below $6000, safe from bank swap) ---
+DIM gPatBank   (1) AS BYTE FOR BANK READ : GLOBAL gPatBank
+DIM gPatPtr    (2) AS BYTE FOR BANK READ : GLOBAL gPatPtr    : ' ADDRESS hi/lo
+DIM gNoteDiv   (1) AS BYTE FOR BANK READ : GLOBAL gNoteDiv
+DIM gNoteIdx   (1) AS BYTE FOR BANK READ : GLOBAL gNoteIdx
+DIM gNoteShi   (1) AS BYTE FOR BANK READ : GLOBAL gNoteShi
+DIM gNoteSlo   (1) AS BYTE FOR BANK READ : GLOBAL gNoteSlo
+
 
 ' =============================================================================
 ' INIT_DAC
+' Enables the DAC output on the MO6 sound chip.
 ' =============================================================================
 PROC init_dac
     ON CPU6809 BEGIN ASM
@@ -59,30 +71,46 @@ PROC init_dac
     END ASM ON CPU6809
 END PROC
 
+
 ' =============================================================================
-' CHECK_KEY
+' READ_NOTE_ASM
+' Reads 4 bytes from banked RAM at gPatPtr into gNoteDiv/Idx/Shi/Slo.
+' Does NOT advance gPatPtr (caller does it).
+' Bank is restored to 7 after the read.
 ' =============================================================================
-PROC check_key
+PROC read_note_asm
     ON CPU6809 BEGIN ASM
-        SWI
-        FCB   $0C
-        BCC   CK_NONE
-        STB   _gKeyPressed
-        BRA   CK_DONE
-CK_NONE:
-        CLR   _gKeyPressed
-CK_DONE:
+        LDA   _gPatBank
+        STA   $A7E5
+        LDX   _gPatPtr
+        LDA   0,X
+        STA   _gNoteDiv
+        LDA   1,X
+        STA   _gNoteIdx
+        LDA   2,X
+        STA   _gNoteShi
+        LDA   3,X
+        STA   _gNoteSlo
+        LDA   #7
+        STA   $A7E5
     END ASM ON CPU6809
 END PROC
 
+
 ' =============================================================================
 ' PLAY_CHUNK_ASM
+' Outputs gChunkSize samples from gWaveBase at 8.8 fixed-point step.
+' Timing loop: ~125us per sample = ~8kHz.
+' Bank is restored to 7 after playback.
 ' =============================================================================
 PROC play_chunk_asm
     ON CPU6809 BEGIN ASM
         LDX   _gWaveBase
         LDY   _gChunkSize
         CLR   _gFracAcc
+
+        LDA   _gWavBank
+        STA   $A7E5
 
 PCH_LOOP:
         LDA   0,X
@@ -102,147 +130,71 @@ PCH_DLY:
 
         LEAY  -1,Y
         BNE   PCH_LOOP
+
+        LDA   #7
+        STA   $A7E5
     END ASM ON CPU6809
 END PROC
 
-' =============================================================================
-' PLAY_NOTE
-' Suona un chunk del wave (9600 byte fissi) a blocchi da 256 byte.
-' =============================================================================
-PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
-    DIM totalSize AS INTEGER
-    DIM srcOff    AS ADDRESS
-    DIM remaining AS INTEGER
-    DIM blockSize AS INTEGER
-
-    totalSize = 9600 / chunkDiv
-    srcOff    = VARBANKPTR(wave) + (totalSize * chunkIdx)
-    remaining = totalSize
-    gStepHi   = stepHi
-    gStepLo   = stepLo
-
-    WHILE remaining > 0
-        IF remaining > 256 THEN
-            blockSize = 256
-        ELSE
-            blockSize = remaining
-        ENDIF
-        BANK READ VARBANK(wave) FROM srcOff TO VARPTR(chunkBuf) SIZE blockSize
-        gChunkSize = blockSize
-        gWaveBase  = VARPTR(chunkBuf)
-        CALL play_chunk_asm
-        srcOff    = srcOff + blockSize
-        remaining = remaining - blockSize
-    WEND
-END PROC
 
 ' =============================================================================
-' LOAD_PATTERN
-' Copia dal bank solo le note del pattern richiesto in patNotes.
+' PLAY_NOTE  [chunkIdx, chunkDiv, stepHi, stepLo]
+' chunkIdx = $FF -> random chunk in 0..chunkDiv-1
+' chunkDiv = number of equal slices the wave is divided into
+' stepHi/Lo = 8.8 fixed-point pitch multiplier
 ' =============================================================================
-PROCEDURE load_pattern[patIdx AS BYTE]
-    DIM base     AS ADDRESS
-    DIM offCur   AS INTEGER
-    DIM offNext  AS INTEGER
-    DIM noteSize AS INTEGER
-    DIM srcOff   AS ADDRESS
-
-    base = VARPTR(patHeader)
-
-    offCur  = PEEK(base + 1 + (patIdx - 1) * 2) * 256 + PEEK(base + 2 + (patIdx - 1) * 2)
-
-    IF patIdx >= nPatterns THEN
-        offNext = SIZE(patFile)
+PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE]
+    DIM actualIdx AS BYTE
+    DIM addr      AS ADDRESS
+    DIM sz        AS INTEGER
+    IF chunkIdx = $FF THEN
+        actualIdx = RND(chunkDiv)   ' random slice 0..chunkDiv-1
     ELSE
-        offNext = PEEK(base + 1 + patIdx * 2) * 256 + PEEK(base + 2 + patIdx * 2)
+        actualIdx = chunkIdx
     ENDIF
-
-    noteSize = offNext - offCur
-    IF noteSize > 128 THEN noteSize = 128
-    IF noteSize < 0   THEN noteSize = 0
-
-    srcOff = VARBANKPTR(patFile) + offCur
-    BANK READ VARBANK(patFile) FROM srcOff TO VARPTR(patNotes) SIZE noteSize
-    patNotesSize = noteSize
+    sz            = 9600 / chunkDiv
+    gChunkSize(0) = sz / 256
+    gChunkSize(1) = sz AND $FF
+    addr          = VARBANKPTR(wave) + (sz * actualIdx)
+    gWaveBase(0)  = addr / 256
+    gWaveBase(1)  = addr AND $FF
+    gWavBank(0)   = VARBANK(wave)
+    gStepHi(0)    = stepHi
+    gStepLo(0)    = stepLo
+    CALL play_chunk_asm
 END PROC
 
-' =============================================================================
-' PLAY_PATTERN
-' Suona le note gia caricate in patNotes.
-' =============================================================================
-PROCEDURE play_pattern
-    DIM noteAddr  AS ADDRESS
-    DIM noteCount AS INTEGER
-    DIM n         AS INTEGER
-    DIM bDiv      AS BYTE
-    DIM bIdx      AS BYTE
-    DIM bStepHi   AS BYTE
-    DIM bStepLo   AS BYTE
-
-    noteCount = patNotesSize / 4
-    noteAddr  = VARPTR(patNotes)
-
-    FOR n = 0 TO noteCount - 1
-        bDiv    = PEEK(noteAddr + n * 4)
-        bIdx    = PEEK(noteAddr + n * 4 + 1)
-        bStepHi = PEEK(noteAddr + n * 4 + 2)
-        bStepLo = PEEK(noteAddr + n * 4 + 3)
-        play_note[bIdx, bDiv, bStepHi, bStepLo]
-    NEXT n
-END PROC
-
-' =============================================================================
-' HANDLE_KEY
-' =============================================================================
-PROCEDURE handle_key[k AS BYTE]
-    DIM req AS BYTE
-    req = 0
-    SELECT CASE k
-        CASE $0A : req = 1
-        CASE $12 : req = 2
-        CASE $1A : req = 3
-        CASE $22 : req = 4
-        CASE $2A : req = 5
-        CASE $32 : req = 6
-        CASE $33 : req = 7
-        CASE $2B : req = 8
-        CASE $23 : req = 9
-        CASE ELSE
-            IF k <> 0 THEN
-                PRINT "Stop."
-                END
-            ENDIF
-    ENDSELECT
-    IF req >= 1 AND req <= nPatterns THEN
-        IF req <> curPattern THEN
-            curPattern = req
-            load_pattern[curPattern]
-            PRINT "Pattern: "; curPattern
-        ENDIF
-    ENDIF
-END PROC
 
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v1.0"
 CALL init_dac
 
-' Copia solo header di patterns.bin (19 byte)
-BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(patHeader) SIZE 19
+' --- Parse patterns.bin header from banked RAM ---
+' Reuse read_note_asm: first 4 bytes are N | off_hi | off_lo | (ignored)
+gPatBank(0) = VARBANK(patFile)
+DIM tmp     AS ADDRESS : tmp = VARBANKPTR(patFile)
+gPatPtr(0)  = tmp / 256
+gPatPtr(1)  = tmp AND $FF
+CALL read_note_asm
 
-nPatterns  = PEEK(VARPTR(patHeader))
-curPattern = 1
+DIM nPat       AS BYTE    : nPat       = gNoteDiv(0)               ' number of patterns
+DIM offHi      AS BYTE    : offHi      = gNoteIdx(0)               ' pattern 1 offset high
+DIM offLo      AS BYTE    : offLo      = gNoteShi(0)               ' pattern 1 offset low
+DIM pat1Off    AS INTEGER : pat1Off    = offHi * 256 + offLo       ' absolute offset
+DIM fileSize   AS INTEGER : fileSize   = SIZE(patFile)
+DIM totalNotes AS INTEGER : totalNotes = (fileSize - pat1Off) / 4  ' notes in pattern 1
+DIM basePtr    AS ADDRESS : basePtr    = VARBANKPTR(patFile) + pat1Off
 
-PRINT "patterns: "; nPatterns
+DIM n AS INTEGER
 
-' Carica subito il primo pattern
-load_pattern[curPattern]
-
-PRINT "1-9 = pattern  altro = stop"
-
+' --- Main loop: play pattern 1 forever ---
 DO
-    CALL check_key
-    handle_key[gKeyPressed]
-    play_pattern
+    FOR n = 0 TO totalNotes - 1
+        tmp        = basePtr + n * 4
+        gPatPtr(0) = tmp / 256
+        gPatPtr(1) = tmp AND $FF
+        CALL read_note_asm
+        play_note[gNoteIdx(0), gNoteDiv(0), gNoteShi(0), gNoteSlo(0)]
+    NEXT n
 LOOP
