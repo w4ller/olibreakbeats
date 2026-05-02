@@ -148,7 +148,7 @@ PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo A
     DIM addr      AS ADDRESS
     DIM sz        AS INTEGER
     IF chunkIdx = $FF THEN
-        actualIdx = RND(chunkDiv)   ' random slice 0..chunkDiv-1
+        actualIdx = RND(chunkDiv)   :' random slice 0..chunkDiv-1
     ELSE
         actualIdx = chunkIdx
     ENDIF
@@ -178,12 +178,12 @@ gPatPtr(0)  = tmp / 256
 gPatPtr(1)  = tmp AND $FF
 CALL read_note_asm
 
-DIM nPat       AS BYTE    : nPat       = gNoteDiv(0)               ' number of patterns
-DIM offHi      AS BYTE    : offHi      = gNoteIdx(0)               ' pattern 1 offset high
-DIM offLo      AS BYTE    : offLo      = gNoteShi(0)               ' pattern 1 offset low
-DIM pat1Off    AS INTEGER : pat1Off    = offHi * 256 + offLo       ' absolute offset
+DIM nPat       AS BYTE    : nPat       = gNoteDiv(0)               :' number of patterns
+DIM offHi      AS BYTE    : offHi      = gNoteIdx(0)               :' pattern 1 offset high
+DIM offLo      AS BYTE    : offLo      = gNoteShi(0)               :' pattern 1 offset low
+DIM pat1Off    AS INTEGER : pat1Off    = offHi * 256 + offLo       :' absolute offset
 DIM fileSize   AS INTEGER : fileSize   = SIZE(patFile)
-DIM totalNotes AS INTEGER : totalNotes = (fileSize - pat1Off) / 4  ' notes in pattern 1
+DIM totalNotes AS INTEGER : totalNotes = (fileSize - pat1Off) / 4  :' notes in pattern 1
 DIM basePtr    AS ADDRESS : basePtr    = VARBANKPTR(patFile) + pat1Off
 
 DIM n AS INTEGER
