@@ -1,15 +1,17 @@
 ' =============================================================================
-' olibreakbeats — main.bas   v0.2  (Passo 2)
+' olibreakbeats — main.bas   v0.5  (Passo 5)
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' ASM core player con step variabile per slot (pitch senza cambiare ritmo).
-' Delay calibrato empiricamente su dcmoto: B=72 → ~8kHz output rate.
+' PASSO 5: amen150.bin caricato in memoria BANKED.
+' play_chunk_asm fa il bank switch internamente:
+'   STA $A7E5  -> attiva banco WAV
+'   ... loop DAC ...
+'   LDA #7 / STA $A7E5  -> ripristina banco normale
 '
-' Nota clock MO6: la CPU 6809 nel Thomson MO6 gira a ~3.58 MHz nominali.
-' Il valore B=72 e' il riferimento calibrato empiricamente — non modificare
-' senza riverificare il pitch su dcmoto.
+' Il resto (delay B=24, step 8.8, gChunkSize/gWaveBase) e' identico
+' alla v0.2 che funzionava.
 '
-' Step 8.8 fixed-point: parte alta = intera, parte bassa = frazionaria.
+' Step 8.8 fixed-point:
 '   $0100 = 1.0x  pitch originale
 '   $0200 = 2.0x  ottava sopra
 '   $0180 = 1.5x  quinta sopra
@@ -18,28 +20,22 @@
 ' =============================================================================
 
 
-' --- Sample (raw PCM 8kHz 8-bit unsigned mono) ---
+' --- Sample BANKED (raw PCM 8kHz 8-bit unsigned mono) ---
 GLOBAL wave
-wave = LOAD("assets/amen150.bin")
+wave := LOAD("assets/amen150.bin") BANKED
 
 
 ' --- Interfaccia ASM player ---
-' pointer to start of current chunk
-DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
-' number of output samples (fixed duration)
-DIM gChunkSize AS INTEGER  : GLOBAL gChunkSize
-' step integer part  (8.8 fixed-pt)
-DIM gStepHi    AS BYTE : GLOBAL gStepHi
-' step fractional part
-DIM gStepLo    AS BYTE : GLOBAL gStepLo
-' fractional accumulator (reset each chunk)
-DIM gFracAcc   AS BYTE : GLOBAL gFracAcc
+DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase   ' puntatore al chunk corrente
+DIM gChunkSize AS INTEGER : GLOBAL gChunkSize  ' campioni da emettere
+DIM gStepHi    AS BYTE    : GLOBAL gStepHi     ' step parte intera  (8.8)
+DIM gStepLo    AS BYTE    : GLOBAL gStepLo     ' step parte frazionaria
+DIM gFracAcc   AS BYTE    : GLOBAL gFracAcc    ' accumulatore frazionario
+DIM gWavBank   AS BYTE    : GLOBAL gWavBank    ' numero banco del WAV
 
 
 ' =============================================================================
 ' INIT_DAC
-' Configura PIA port B bits 0-5 come uscite per il DAC a 6 bit.
-' Da chiamare una sola volta all'avvio.
 ' =============================================================================
 PROC init_dac
     ON CPU6809 BEGIN ASM
@@ -56,15 +52,10 @@ END PROC
 
 ' =============================================================================
 ' PLAY_CHUNK_ASM
-' Emette esattamente gChunkSize campioni da gWaveBase al DAC.
-'
-' Durata   = gChunkSize x T_campione = COSTANTE (Y e' il contatore fisso).
-' Pitch    = determinato da gStepHi.gStepLo (8.8 fixed-point).
-'
-' Aumentare B  -> sample rate piu' bassa -> tutto piu' lento E piu' grave.
-' Cambiare step -> solo pitch, durata slot invariata.
-'
-' Delay calibrato empiricamente su dcmoto: B=72 -> ~8kHz.
+' Identico alla v0.2 tranne per il bank switch attorno al loop:
+'   - attiva gWavBank prima del loop
+'   - ripristina banco 7 dopo il loop
+' gWaveBase punta direttamente al dato nel map 6809 dopo il bank switch.
 ' =============================================================================
 PROC play_chunk_asm
     ON CPU6809 BEGIN ASM
@@ -72,22 +63,21 @@ PROC play_chunk_asm
         LDY   _gChunkSize
         CLR   _gFracAcc
 
+        ; --- attiva banco WAV ---
+        LDA   _gWavBank
+        STA   $A7E5
 
 PCH_LOOP:
         LDA   0,X
         STA   $A7CD
 
-
-        ; --- delay calibrato (B=24) ---
+        ; --- delay calibrato (B=24, identico v0.2) ---
         LDB   #24
 PCH_DLY:
         DECB
         BNE   PCH_DLY
 
-
         ; --- avanzamento fixed-point 8.8 ---
-        ; gFracAcc += gStepLo  carry -> gStepHi
-        ; X += gStepHi + carry
         LDB   _gFracAcc
         ADDB  _gStepLo
         STB   _gFracAcc
@@ -95,30 +85,27 @@ PCH_DLY:
         ADCB  #0
         ABX
 
-
         LEAY  -1,Y
         BNE   PCH_LOOP
+
+        ; --- ripristina banco normale (7) ---
+        LDA   #7
+        STA   $A7E5
     END ASM ON CPU6809
 END PROC
 
 
 ' =============================================================================
 ' PLAY_NOTE
-' Seleziona un chunk e lo suona con lo step (pitch) specificato.
-'
-'   chunkIdx  : quale fetta suonare (0 ... chunkDiv-1)
-'   chunkDiv  : in quante fette uguali dividere il sample (4, 8, 16)
-'   stepHi    : parte intera dello step 8.8  (es. $01 = 1.0x)
-'   stepLo    : parte frazionaria dello step (es. $00 = .0, $80 = .5)
-'
-' Esempi:
-'   play_note[0, 4, $01, $00]  primo quarto, pitch originale
-'   play_note[1, 4, $02, $00]  secondo quarto, ottava sopra
-'   play_note[2, 8, $00, $80]  terzo ottavo, ottava sotto
+' Come v0.2 ma usa VARBANKPTR/VARBANK invece di VARPTR/SIZE.
+' La dimensione del WAV e' fissa: 9600 byte (1 secondo a 9600 Hz).
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS INTEGER, chunkDiv AS INTEGER, stepHi AS BYTE, stepLo AS BYTE]
-    gChunkSize = SIZE(wave) / chunkDiv
-    gWaveBase  = VARPTR(wave) + (gChunkSize * chunkIdx)
+    DIM wavSize AS INTEGER
+    wavSize    = 9600
+    gChunkSize = wavSize / chunkDiv
+    gWaveBase  = VARBANKPTR(wave) + (gChunkSize * chunkIdx)
+    gWavBank   = VARBANK(wave)
     gStepHi    = stepHi
     gStepLo    = stepLo
     CALL play_chunk_asm
@@ -128,33 +115,23 @@ END PROC
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.2 - Passo 2"
+PRINT "olibreakbeats v0.5 - Passo 5 (wave BANKED)"
 CALL init_dac
 
 
-' --- Pattern breakbeat con pitch variabile ---
-' Notazione: play_note[chunkIndex, nChunk, stepHi, stepLo]
-'
-' I chunk a step $0200 (ottava sopra) suonano piu' acuti ma
-' occupano lo stesso slot temporale.
-' I chunk a step $0080 (ottava sotto) suonano piu' gravi.
 DO
-    ' --- Bar 1: pattern base con variazioni di pitch ---
     play_note[0, 1, $01, $00]
     play_note[0, 1, $01, $00]
-
 
     play_note[1, 4, $01, $00]
     play_note[3, 4, $01, $00]
     play_note[0, 4, $01, $00]
     play_note[3, 4, $01, $00]
 
-
     play_note[3, 8, $01, $0f]
     play_note[3, 8, $01, $1f]
     play_note[3, 8, $01, $30]
     play_note[3, 8, $01, $35]
-
 
     play_note[7, 16, $01, $46]
     play_note[7, 16, $01, $56]
@@ -164,6 +141,4 @@ DO
     play_note[7, 16, $01, $90]
     play_note[7, 16, $01, $A0]
     play_note[7, 16, $01, $C0]
-
-
 LOOP
