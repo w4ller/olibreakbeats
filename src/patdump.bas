@@ -5,12 +5,13 @@
 GLOBAL patFile
 patFile := LOAD("assets/patterns.bin") BANKED
 
-DIM gPatBank AS BYTE    : GLOBAL gPatBank
-DIM gPatPtr  AS ADDRESS : GLOBAL gPatPtr
-DIM gNoteDiv AS BYTE    : GLOBAL gNoteDiv
-DIM gNoteIdx AS BYTE    : GLOBAL gNoteIdx
-DIM gNoteShi AS BYTE    : GLOBAL gNoteShi
-DIM gNoteSlo AS BYTE    : GLOBAL gNoteSlo
+' Variabili in RAM sicura (sotto $6000) - non sovrascritte dal bank swap
+DIM gPatBank  (1) AS BYTE FOR BANK READ : GLOBAL gPatBank
+DIM gPatPtr   (1) AS BYTE FOR BANK READ : GLOBAL gPatPtr  : ' ADDRESS = 2 byte, usiamo array(2)
+DIM gNoteDiv  (1) AS BYTE FOR BANK READ : GLOBAL gNoteDiv
+DIM gNoteIdx  (1) AS BYTE FOR BANK READ : GLOBAL gNoteIdx
+DIM gNoteShi  (1) AS BYTE FOR BANK READ : GLOBAL gNoteShi
+DIM gNoteSlo  (1) AS BYTE FOR BANK READ : GLOBAL gNoteSlo
 
 ' =============================================================================
 ' READ_NOTE_ASM - legge 4 byte da gPatPtr nel banco gPatBank
@@ -34,21 +35,21 @@ PROC read_note_asm
 END PROC
 
 ' --- Setup ---
-gPatBank = VARBANK(patFile)
+gPatBank(0) = VARBANK(patFile)
 
 ' --- Leggi byte 0..3 (header: N, off_hi, off_lo, _) ---
-gPatPtr = VARBANKPTR(patFile)
+gPatPtr(0) = VARBANKPTR(patFile)
 CALL read_note_asm
 
-DIM nPat       AS BYTE    : nPat       = gNoteDiv
-DIM offHi      AS BYTE    : offHi      = gNoteIdx
-DIM offLo      AS BYTE    : offLo      = gNoteShi
+DIM nPat       AS BYTE    : nPat       = gNoteDiv(0)
+DIM offHi      AS BYTE    : offHi      = gNoteIdx(0)
+DIM offLo      AS BYTE    : offLo      = gNoteShi(0)
 DIM pat1Off    AS INTEGER : pat1Off    = offHi * 256 + offLo
 DIM fileSize   AS INTEGER : fileSize   = SIZE(patFile)
 DIM totalNotes AS INTEGER : totalNotes = (fileSize - pat1Off) / 4
 DIM basePtr    AS ADDRESS : basePtr    = VARBANKPTR(patFile) + pat1Off
 
-PRINT "bank    : "; gPatBank
+PRINT "bank    : "; gPatBank(0)
 PRINT "fileSize: "; fileSize
 PRINT "nPat    : "; nPat
 PRINT "pat1Off : "; pat1Off
@@ -58,9 +59,9 @@ PRINT ""
 ' --- Stampa ogni nota ---
 DIM n AS INTEGER
 FOR n = 0 TO totalNotes - 1
-    gPatPtr = basePtr + n * 4
+    gPatPtr(0) = basePtr + n * 4
     CALL read_note_asm
-    PRINT n; ": div="; gNoteDiv; " idx="; gNoteIdx; " shi="; gNoteShi; " slo="; gNoteSlo
+    PRINT n; ": div="; gNoteDiv(0); " idx="; gNoteIdx(0); " shi="; gNoteShi(0); " slo="; gNoteSlo(0)
 NEXT n
 
 PRINT ""
