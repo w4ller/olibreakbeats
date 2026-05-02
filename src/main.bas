@@ -89,9 +89,9 @@ END PROC
 PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE]
     DIM actualIdx AS BYTE
     IF chunkIdx = $FF THEN
-        actualIdx = RND(chunkDiv)
+        actualIdx = RND(chunkDiv) : ' 0..chunkDiv-1
     ELSE
-        actualIdx = chunkIdx
+        actualIdx = chunkIdx : ' indice fisso
     ENDIF
     gChunkSize = 9600 / chunkDiv
     gWaveBase  = VARBANKPTR(wave) + (gChunkSize * actualIdx)
@@ -105,7 +105,7 @@ END PROC
 ' =============================================================================
 ' Main
 ' =============================================================================
-PRINT "olibreakbeats v0.6 - generativo"
+' PRINT "olibreakbeats v0.6 - generativo"
 CALL init_dac
 
 
