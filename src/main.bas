@@ -1,32 +1,43 @@
 ' =============================================================================
-' olibreakbeats — main.bas   v0.6  (Passo 5+)
+' olibreakbeats - main.bas   v0.7  (Passo 6)
 ' Thomson MO6 / UGBasic / Motorola 6809
 '
-' v0.6: modalita generativa.
-' Se chunkIdx = $FF, play_note sceglie un indice casuale tra 0..chunkDiv-1.
-' Tutto il resto identico alla v0.5.
+' v0.7: patterns.bin letto DIRETTAMENTE dal banco via ASM.
+' read_note_asm fa bank switch, legge 4 byte, ripristina banco 7.
+' Nessun buffer patBuf, nessun PEEK, nessun BANK READ nel loop.
 '
-' Step 8.8 fixed-point:
-'   $0100 = 1.0x  pitch originale
-'   $0200 = 2.0x  ottava sopra
-'   $0180 = 1.5x  quinta sopra
-'   $0080 = 0.5x  ottava sotto
-'   $00C0 = 0.75x quarta sotto
+' Struttura patterns.bin:
+'   byte 0      : N pattern
+'   byte 1..2   : offset assoluto pattern 1 (WORD big-endian)
+'   ...         : offset assoluto pattern i
+'   dati        : note da 4 byte: DIV IDX STEP_HI STEP_LO
+'                 IDX=$FF = chunk casuale a runtime
 ' =============================================================================
 
 
-' --- Sample BANKED (raw PCM 8kHz 8-bit unsigned mono) ---
+' --- Assets BANKED ---
 GLOBAL wave
 wave := LOAD("assets/amen150.bin") BANKED
 
+GLOBAL patFile
+patFile := LOAD("assets/patterns.bin") BANKED
 
-' --- Interfaccia ASM player ---
+
+' --- Interfaccia ASM player WAV ---
 DIM gWaveBase  AS ADDRESS : GLOBAL gWaveBase
 DIM gChunkSize AS INTEGER : GLOBAL gChunkSize
 DIM gStepHi    AS BYTE    : GLOBAL gStepHi
 DIM gStepLo    AS BYTE    : GLOBAL gStepLo
 DIM gFracAcc   AS BYTE    : GLOBAL gFracAcc
 DIM gWavBank   AS BYTE    : GLOBAL gWavBank
+
+' --- Interfaccia ASM lettura pattern ---
+DIM gPatBank   AS BYTE    : GLOBAL gPatBank   : ' banco di patFile
+DIM gPatPtr    AS ADDRESS : GLOBAL gPatPtr    : ' puntatore nota corrente nel banco
+DIM gNoteDiv   AS BYTE    : GLOBAL gNoteDiv   : ' DIV letto
+DIM gNoteIdx   AS BYTE    : GLOBAL gNoteIdx   : ' IDX letto ($FF = RND)
+DIM gNoteShi   AS BYTE    : GLOBAL gNoteShi   : ' STEP_HI letto
+DIM gNoteSlo   AS BYTE    : GLOBAL gNoteSlo   : ' STEP_LO letto
 
 
 ' =============================================================================
@@ -41,6 +52,33 @@ PROC init_dac
         STB   $A7CD
         ORA   #$04
         STA   $A7CF
+    END ASM ON CPU6809
+END PROC
+
+
+' =============================================================================
+' READ_NOTE_ASM
+' Legge 4 byte da gPatPtr nel banco gPatBank.
+' Risultati in gNoteDiv, gNoteIdx, gNoteShi, gNoteSlo.
+' gPatPtr NON viene aggiornato (lo fa il BASIC dopo).
+' =============================================================================
+PROC read_note_asm
+    ON CPU6809 BEGIN ASM
+        LDA   _gPatBank
+        STA   $A7E5
+
+        LDX   _gPatPtr
+        LDA   0,X
+        STA   _gNoteDiv
+        LDA   1,X
+        STA   _gNoteIdx
+        LDA   2,X
+        STA   _gNoteShi
+        LDA   3,X
+        STA   _gNoteSlo
+
+        LDA   #7
+        STA   $A7E5
     END ASM ON CPU6809
 END PROC
 
@@ -84,7 +122,7 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE
-' chunkIdx = $FF -> indice casuale tra 0..chunkDiv-1
+' chunkIdx=$FF -> chunk casuale tra 0..chunkDiv-1
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE]
     DIM actualIdx AS BYTE
@@ -105,30 +143,34 @@ END PROC
 ' =============================================================================
 ' Main
 ' =============================================================================
-' PRINT "olibreakbeats v0.6 - generativo"
 CALL init_dac
 
+' --- Leggi header patterns.bin dal banco ---
+' byte 0 = N pattern
+' byte 1..2 = offset assoluto pattern 1 (big-endian WORD)
+gPatBank = VARBANK(patFile)
+
+' Leggi byte 0 (N pattern)
+gPatPtr = VARBANKPTR(patFile)
+CALL read_note_asm : ' riusa read_note_asm: gNoteDiv=N, gNoteIdx=off_hi, gNoteShi=off_lo, gNoteSlo=byte3
+DIM nPat     AS BYTE    : nPat     = gNoteDiv : ' N pattern
+DIM offHi    AS BYTE    : offHi    = gNoteIdx : ' offset pat1 high byte
+DIM offLo    AS BYTE    : offLo    = gNoteShi : ' offset pat1 low byte
+DIM pat1Off  AS ADDRESS : pat1Off  = offHi * 256 + offLo : ' offset assoluto pattern 1
+
+' Numero note nel pattern 1 = (fileSize - pat1Off) / 4
+DIM fileSize  AS INTEGER : fileSize  = SIZE(patFile)
+DIM totalNotes AS INTEGER : totalNotes = (fileSize - pat1Off) / 4
+
+' Puntatore alla prima nota del pattern 1
+DIM basePtr  AS ADDRESS : basePtr  = VARBANKPTR(patFile) + pat1Off
+
+DIM n AS INTEGER
 
 DO
-    play_note[0, 1, $01, $00]
-    play_note[0, 1, $01, $00]
-
-    play_note[$FF, 4, $01, $00]
-    play_note[$FF, 4, $01, $00]
-    play_note[$FF, 4, $01, $00]
-    play_note[$FF, 4, $01, $00]
-
-    play_note[$FF, 8, $01, $0f]
-    play_note[$FF, 8, $01, $1f]
-    play_note[$FF, 8, $01, $30]
-    play_note[$FF, 8, $01, $35]
-
-    play_note[$FF, 16, $01, $46]
-    play_note[$FF, 16, $01, $56]
-    play_note[$FF, 16, $01, $66]
-    play_note[$FF, 16, $01, $70]
-    play_note[$FF, 16, $01, $80]
-    play_note[$FF, 16, $01, $90]
-    play_note[$FF, 16, $01, $A0]
-    play_note[$FF, 16, $01, $C0]
+    FOR n = 0 TO totalNotes - 1
+        gPatPtr = basePtr + n * 4
+        CALL read_note_asm
+        play_note[gNoteIdx, gNoteDiv, gNoteShi, gNoteSlo]
+    NEXT n
 LOOP
