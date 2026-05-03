@@ -29,8 +29,8 @@ patFile := LOAD("assets/patterns.bin") BANKED
 
 
 ' --- WAV player ASM interface (all below $6000, safe from bank swap) ---
-DIM gWaveBase  (2) AS BYTE FOR BANK READ : GLOBAL gWaveBase  : ' ADDRESS hi/lo
-DIM gChunkSize (2) AS BYTE FOR BANK READ : GLOBAL gChunkSize : ' INTEGER hi/lo
+DIM gWaveBase  (2) AS BYTE FOR BANK READ : GLOBAL gWaveBase  :' ADDRESS hi/lo
+DIM gChunkSize (2) AS BYTE FOR BANK READ : GLOBAL gChunkSize :' INTEGER hi/lo
 DIM gStepHi    (1) AS BYTE FOR BANK READ : GLOBAL gStepHi
 DIM gStepLo    (1) AS BYTE FOR BANK READ : GLOBAL gStepLo
 DIM gFracAcc   (1) AS BYTE FOR BANK READ : GLOBAL gFracAcc
@@ -38,8 +38,15 @@ DIM gWavBank   (1) AS BYTE FOR BANK READ : GLOBAL gWavBank
 
 ' --- Pattern reader ASM interface (all below $6000, safe from bank swap) ---
 DIM gPatBank   (1) AS BYTE FOR BANK READ : GLOBAL gPatBank
-DIM gPatPtr    (2) AS BYTE FOR BANK READ : GLOBAL gPatPtr    : ' ADDRESS hi/lo
+DIM gPatPtr    (2) AS BYTE FOR BANK READ : GLOBAL gPatPtr    :' ADDRESS hi/lo
 DIM gNoteDiv   (1) AS BYTE FOR BANK READ : GLOBAL gNoteDiv
 DIM gNoteIdx   (1) AS BYTE FOR BANK READ : GLOBAL gNoteIdx
 DIM gNoteShi   (1) AS BYTE FOR BANK READ : GLOBAL gNoteShi
 DIM gNoteSlo   (1) AS BYTE FOR BANK READ : GLOBAL gNoteSlo
+
+' --- Pattern offset table (precalcolato da read_header, sotto $6000) ---
+' 257 slot: indici 1..N per i pattern + slot N+1 sentinella (fine file)
+' Ogni slot = 2 byte (hi, lo) -> 514 byte totali
+DIM gNPat          (1)   AS BYTE FOR BANK READ : GLOBAL gNPat    :' numero pattern nel file
+DIM gPatternOffset (514) AS BYTE FOR BANK READ : GLOBAL gPatternOffset :' ADDRESS hi/lo x 257
+DIM gCurPat        (1)   AS BYTE FOR BANK READ : GLOBAL gCurPat  :' pattern corrente (1-based)
