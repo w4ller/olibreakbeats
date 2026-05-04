@@ -1,7 +1,6 @@
 ' =============================================================================
 ' olibreakbeats - main.bas   v0.9  TEST
-' Test: 4 slice dell'amen in sequenza, valori hardcodati.
-' Bypass completo di read_header e play_pattern.
+' Test: legge note da array locale con FOR, senza play_pattern.
 ' =============================================================================
 
 INCLUDE "src/globals.bas"
@@ -11,9 +10,16 @@ INCLUDE "src/player.bas"
 
 CALL init_dac
 
+DIM pat(16) AS BYTE
+pat(0)  = 0 : pat(1)  = 4 : pat(2)  = 1 : pat(3)  = 0
+pat(4)  = 1 : pat(5)  = 4 : pat(6)  = 1 : pat(7)  = 0
+pat(8)  = 2 : pat(9)  = 4 : pat(10) = 1 : pat(11) = 0
+pat(12) = 3 : pat(13) = 4 : pat(14) = 1 : pat(15) = 0
+
+DIM n AS BYTE
+
 DO
-    play_note[0, 4, 1, 0]
-    play_note[1, 4, 1, 0]
-    play_note[2, 4, 1, 0]
-    play_note[3, 4, 1, 0]
+    FOR n = 0 TO 3
+        play_note[pat(n*4), pat(n*4+1), pat(n*4+2), pat(n*4+3)]
+    NEXT n
 LOOP
