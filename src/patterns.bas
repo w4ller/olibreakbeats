@@ -49,14 +49,16 @@ END PROC
 ' =============================================================================
 ' TEST DATA - hardcoded pattern (4 notes x 4 bytes)
 ' Format: [div][idx][stepHI][stepLO]
+' chunkDiv=4 -> IDX validi: 0,1,2,3
+' step $01,$00 = 1.0x pitch originale
 ' TODO: remove after crash isolation test
 ' =============================================================================
 DIM testPattern(16) AS BYTE : GLOBAL testPattern
 
-testPattern(0)  = 4  : testPattern(1)  = 10 : testPattern(2)  = 1 : testPattern(3)  = 128
-testPattern(4)  = 4  : testPattern(5)  = 20 : testPattern(6)  = 1 : testPattern(7)  = 64
-testPattern(8)  = 4  : testPattern(9)  = 30 : testPattern(10) = 1 : testPattern(11) = 200
-testPattern(12) = 4  : testPattern(13) = 40 : testPattern(14) = 2 : testPattern(15) = 0
+testPattern(0)  = 4 : testPattern(1)  = 0 : testPattern(2)  = 1 : testPattern(3)  = 0
+testPattern(4)  = 4 : testPattern(5)  = 1 : testPattern(6)  = 1 : testPattern(7)  = 0
+testPattern(8)  = 4 : testPattern(9)  = 2 : testPattern(10) = 1 : testPattern(11) = 0
+testPattern(12) = 4 : testPattern(13) = 3 : testPattern(14) = 1 : testPattern(15) = 0
 
 
 ' =============================================================================
