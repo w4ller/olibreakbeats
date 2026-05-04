@@ -88,20 +88,32 @@ END PROC
 ' PLAY_PATTERN
 ' Plays all notes of the current pattern (gCurPat) once.
 ' Note count = (offset[curPat+1] - offset[curPat]) / 4
+'
+' FIX: gPatternOffset contiene byte separati hi/lo.
+' ugBASIC tronca "BYTE * 256" a 8 bit prima di assegnare.
+' Soluzione: copia hi/lo in variabili INTEGER prima di fare l aritmetica.
 ' =============================================================================
 PROCEDURE play_pattern
     DIM n          AS INTEGER
     DIM slotIdx    AS INTEGER
+    DIM tmpHi      AS INTEGER
+    DIM tmpLo      AS INTEGER
     DIM baseAddr   AS ADDRESS
     DIM nextAddr   AS ADDRESS
     DIM totalNotes AS INTEGER
     DIM tmp        AS ADDRESS
 
+    ' baseAddr: leggi slot (curPat-1)*2 e (curPat-1)*2+1
     slotIdx  = (gCurPat(0) - 1) * 2
-    baseAddr = gPatternOffset(slotIdx) * 256 + gPatternOffset(slotIdx + 1)
+    tmpHi    = gPatternOffset(slotIdx)
+    tmpLo    = gPatternOffset(slotIdx + 1)
+    baseAddr = tmpHi * 256 + tmpLo
 
+    ' nextAddr: leggi slot curPat*2 e curPat*2+1
     slotIdx  = gCurPat(0) * 2
-    nextAddr = gPatternOffset(slotIdx) * 256 + gPatternOffset(slotIdx + 1)
+    tmpHi    = gPatternOffset(slotIdx)
+    tmpLo    = gPatternOffset(slotIdx + 1)
+    nextAddr = tmpHi * 256 + tmpLo
 
     totalNotes = (nextAddr - baseAddr) / 4
 
