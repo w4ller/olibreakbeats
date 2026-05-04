@@ -35,17 +35,19 @@ END PROC
 
 ' =============================================================================
 ' LOAD_PATTERN[patIdx]
-' DEBUG: calcolo tmp + prima read_byte_asm
+' DEBUG: offset calcolato in INTEGER prima di sommare a base ADDRESS
 ' =============================================================================
 PROCEDURE load_pattern[patIdx AS BYTE]
-    DIM base AS ADDRESS
-    DIM tmp  AS ADDRESS
-    DIM hiB  AS INTEGER
+    DIM base   AS ADDRESS
+    DIM tmp    AS ADDRESS
+    DIM offset AS INTEGER
+    DIM hiB    AS INTEGER
 
     gPatBank(0) = VARBANK(patFile)
     base        = VARBANKPTR(patFile)
 
-    tmp        = base + 1 + (patIdx - 1) * 2
+    offset     = (patIdx - 1) * 2 + 1
+    tmp        = base + offset
     gPatPtr(0) = tmp / 256
     gPatPtr(1) = tmp AND $FF
     CALL read_byte_asm
