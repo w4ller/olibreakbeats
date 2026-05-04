@@ -1,6 +1,6 @@
 ' =============================================================================
 ' olibreakbeats - main.bas   v0.9  TEST
-' Test: legge note da array locale con FOR, senza play_pattern.
+' Test: play_pattern con array+nNotes passati come parametri.
 ' =============================================================================
 
 INCLUDE "src/globals.bas"
@@ -16,10 +16,6 @@ pat(4)  = 1 : pat(5)  = 4 : pat(6)  = 1 : pat(7)  = 0
 pat(8)  = 2 : pat(9)  = 4 : pat(10) = 1 : pat(11) = 0
 pat(12) = 3 : pat(13) = 4 : pat(14) = 1 : pat(15) = 0
 
-DIM n AS BYTE
-
 DO
-    FOR n = 0 TO 3
-        play_note[pat(n*4), pat(n*4+1), pat(n*4+2), pat(n*4+3)]
-    NEXT n
+    play_pattern[pat, 4]
 LOOP
