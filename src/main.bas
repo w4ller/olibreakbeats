@@ -1,15 +1,7 @@
 ' =============================================================================
-' olibreakbeats - main.bas   v0.9
-' Thomson MO6 / ugBASIC / Motorola 6809
-'
-' Pattern-driven generative breakbeat player.
-' Reads patterns.bin directly from banked RAM via ASM (no buffer).
-'
-' Step 8.8 fixed-point pitch:
-'   $0100 = 1.0x  original pitch
-'   $0200 = 2.0x  octave up
-'   $0180 = 1.5x  fifth up
-'   $0080 = 0.5x  octave down
+' olibreakbeats - main.bas   v0.9  TEST
+' Test minimo: chiama play_note direttamente con valori fissi.
+' Bypass completo di read_header e play_pattern.
 ' =============================================================================
 
 INCLUDE "src/globals.bas"
@@ -18,8 +10,8 @@ INCLUDE "src/patterns.bas"
 INCLUDE "src/player.bas"
 
 CALL init_dac
-CALL read_header
 
 DO
-    CALL play_pattern
+    ' div=4, idx=0, stepHi=1, stepLo=0  -> slice 0 di 4, pitch 1.0x
+    play_note[0, 4, 1, 0]
 LOOP
