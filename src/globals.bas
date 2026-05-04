@@ -50,3 +50,5 @@ DIM gNoteSlo   (1) AS BYTE FOR BANK READ : GLOBAL gNoteSlo
 DIM gNPat          (1)   AS BYTE FOR BANK READ : GLOBAL gNPat    :' numero pattern nel file
 DIM gPatternOffset (514) AS BYTE FOR BANK READ : GLOBAL gPatternOffset :' ADDRESS hi/lo x 257
 DIM gCurPat        (1)   AS BYTE FOR BANK READ : GLOBAL gCurPat  :' pattern corrente (1-based)
+
+DIM gPat(16) AS BYTE : GLOBAL gPat
