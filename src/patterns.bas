@@ -35,10 +35,12 @@ END PROC
 
 ' =============================================================================
 ' LOAD_PATTERN[patIdx]
-' DEBUG: corpo quasi vuoto, solo VARBANK per isolare il crash.
+' DEBUG: VARBANK + VARBANKPTR
 ' =============================================================================
 PROCEDURE load_pattern[patIdx AS BYTE]
+    DIM base AS ADDRESS
     gPatBank(0) = VARBANK(patFile)
+    base        = VARBANKPTR(patFile)
 END PROC
 
 
