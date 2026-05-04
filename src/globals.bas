@@ -45,10 +45,10 @@ DIM gNoteShi   (1) AS BYTE FOR BANK READ : GLOBAL gNoteShi
 DIM gNoteSlo   (1) AS BYTE FOR BANK READ : GLOBAL gNoteSlo
 
 ' --- Pattern offset table (precalcolato da read_header, sotto $6000) ---
-' 257 slot: indici 1..N per i pattern + slot N+1 sentinella (fine file)
-' Ogni slot = 2 byte (hi, lo) -> 514 byte totali
-DIM gNPat          (1)   AS BYTE FOR BANK READ : GLOBAL gNPat    :' numero pattern nel file
-DIM gPatternOffset (514) AS BYTE FOR BANK READ : GLOBAL gPatternOffset :' ADDRESS hi/lo x 257
-DIM gCurPat        (1)   AS BYTE FOR BANK READ : GLOBAL gCurPat  :' pattern corrente (1-based)
+DIM gNPat          (1)   AS BYTE FOR BANK READ : GLOBAL gNPat
+DIM gPatternOffset (514) AS BYTE FOR BANK READ : GLOBAL gPatternOffset
+DIM gCurPat        (1)   AS BYTE FOR BANK READ : GLOBAL gCurPat
 
-DIM gPat(16) AS BYTE : GLOBAL gPat
+' --- Pattern corrente in RAM normale ---
+DIM gPat    (64) AS BYTE : GLOBAL gPat     :' max 16 note x 4 byte
+DIM gNNotes (1)  AS BYTE : GLOBAL gNNotes  :' numero note nel pattern corrente

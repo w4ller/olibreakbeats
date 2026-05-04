@@ -34,13 +34,13 @@ END PROC
 
 
 ' =============================================================================
-' PLAY_PATTERN[nNotes]
-' Legge nNotes note dall'array globale gPat.
-' Formato: [idx, div, stepHi, stepLo] x nNotes
+' PLAY_PATTERN
+' Legge gNNotes note dall'array globale gPat.
+' Formato: [idx, div, stepHi, stepLo] x gNNotes
 ' =============================================================================
-PROCEDURE play_pattern[nNotes AS BYTE]
+PROCEDURE play_pattern
     DIM n AS BYTE
-    FOR n = 0 TO nNotes - 1
+    FOR n = 0 TO gNNotes(0) - 1
         play_note[gPat(n*4), gPat(n*4+1), gPat(n*4+2), gPat(n*4+3)]
     NEXT n
 END PROC
