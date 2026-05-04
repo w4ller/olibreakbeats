@@ -47,68 +47,40 @@ END PROC
 
 
 ' =============================================================================
+' TEST DATA - hardcoded pattern (4 notes x 4 bytes)
+' Format: [div][idx][stepHI][stepLO]
+' TODO: remove after crash isolation test
+' =============================================================================
+DIM testPattern(16) AS BYTE : GLOBAL testPattern
+
+testPattern(0)  = 4  : testPattern(1)  = 10 : testPattern(2)  = 1 : testPattern(3)  = 128
+testPattern(4)  = 4  : testPattern(5)  = 20 : testPattern(6)  = 1 : testPattern(7)  = 64
+testPattern(8)  = 4  : testPattern(9)  = 30 : testPattern(10) = 1 : testPattern(11) = 200
+testPattern(12) = 4  : testPattern(13) = 40 : testPattern(14) = 2 : testPattern(15) = 0
+
+
+' =============================================================================
 ' READ_HEADER
-' Parses patterns.bin header once at startup.
-' Populates gNPat and gPatternOffset(1..N+1).
-'
-' gPatternOffset layout (2 byte per slot, hi/lo):
-'   slot i  -> absolute RAM address of pattern i data
-'   slot N+1-> address of first byte past last pattern (= VARBANKPTR + fileSize)
-'
-' After read_header, switching pattern is just:
-'   gCurPat(0) = desired_pattern (1-based)
+' TODO: restore original body after crash isolation test.
+' Currently bypasses patterns.bin and points gPatternOffset at testPattern.
 ' =============================================================================
 PROC read_header
-    DIM i        AS BYTE
-    DIM fileOff  AS INTEGER   :' offset dentro il file (big-endian WORD dal file)
-    DIM ramAddr  AS ADDRESS   :' indirizzo RAM assoluto
-    DIM tmp      AS ADDRESS
-    DIM base     AS ADDRESS   :' VARBANKPTR(patFile), calcolato una volta
-    DIM slotIdx  AS INTEGER   :' indice byte dentro gPatternOffset (i*2)
+    DIM addr AS INTEGER
 
-    gPatBank(0) = VARBANK(patFile)
-    base        = VARBANKPTR(patFile)
+    ' === HARDCODED BYPASS - rimuovere dopo il test ===
+    addr = VARPTR(testPattern(0))
 
-    ' --- Leggi N (byte 0 del file) ---
-    tmp        = base
-    gPatPtr(0) = tmp / 256
-    gPatPtr(1) = tmp AND $FF
-    CALL read_byte_asm
-    gNPat(0) = gNoteDiv(0)
+    gNPat(0) = 1
 
-    ' --- Per ogni pattern leggi l'offset dal file e precalcola l'indirizzo RAM ---
-    FOR i = 1 TO gNPat(0)
-        ' Offset del pattern i nell'offset table: byte 1 + (i-1)*2  [hi]
-        '                                          byte 2 + (i-1)*2  [lo]
-        tmp        = base + 1 + (i - 1) * 2
-        gPatPtr(0) = tmp / 256
-        gPatPtr(1) = tmp AND $FF
-        CALL read_byte_asm
-        DIM hiB AS BYTE : hiB = gNoteDiv(0)
+    gPatternOffset(0) = addr / 256
+    gPatternOffset(1) = addr - (gPatternOffset(0) * 256)
 
-        tmp        = tmp + 1
-        gPatPtr(0) = tmp / 256
-        gPatPtr(1) = tmp AND $FF
-        CALL read_byte_asm
-        DIM loB AS BYTE : loB = gNoteDiv(0)
+    addr = addr + 16
+    gPatternOffset(2) = addr / 256
+    gPatternOffset(3) = addr - (gPatternOffset(2) * 256)
 
-        fileOff = hiB * 256 + loB
-        ramAddr = base + fileOff
-
-        ' Scrivi in gPatternOffset: slot i = byte (i-1)*2 e (i-1)*2+1
-        slotIdx = (i - 1) * 2
-        gPatternOffset(slotIdx)     = ramAddr / 256
-        gPatternOffset(slotIdx + 1) = ramAddr AND $FF
-    NEXT i
-
-    ' --- Sentinella: slot N+1 = base + fileSize ---
-    ramAddr = base + SIZE(patFile)
-    slotIdx = gNPat(0) * 2
-    gPatternOffset(slotIdx)     = ramAddr / 256
-    gPatternOffset(slotIdx + 1) = ramAddr AND $FF
-
-    ' --- Parte dal pattern 1 ---
     gCurPat(0) = 1
+    ' === FINE HARDCODED BYPASS ===
 END PROC
 
 
