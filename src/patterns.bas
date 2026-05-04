@@ -35,77 +35,33 @@ END PROC
 
 ' =============================================================================
 ' LOAD_PATTERN[patIdx]
-' Legge il pattern patIdx da patterns.bin (banked) e lo copia in gPat.
-' Imposta gNNotes(0) con il numero di note.
-' patIdx e 1-based.
-'
-' patterns.bin layout:
-'   byte 0       : N pattern
-'   byte 1..2    : offset pattern 1 (big-endian, relativo a byte 0)
-'   byte 3..4    : offset pattern 2
-'   ...
-'   dati note    : [div, idx, stepHi, stepLo] x N
+' DEBUG: legge solo gli offset da patterns.bin, non copia ancora niente.
+' gPat e gNNotes restano hardcodati in main.
 ' =============================================================================
 PROCEDURE load_pattern[patIdx AS BYTE]
-    DIM base    AS ADDRESS
-    DIM tmp     AS ADDRESS
-    DIM hiB     AS INTEGER
-    DIM loB     AS INTEGER
-    DIM offA    AS INTEGER
-    DIM offB    AS INTEGER
-    DIM nNotes  AS BYTE
-    DIM i       AS BYTE
+    DIM base   AS ADDRESS
+    DIM tmp    AS ADDRESS
+    DIM hiB    AS INTEGER
+    DIM loB    AS INTEGER
 
     gPatBank(0) = VARBANK(patFile)
     base        = VARBANKPTR(patFile)
 
-    ' Leggi offset di patIdx
+    ' Leggi hi byte offset patIdx
     tmp        = base + 1 + (patIdx - 1) * 2
     gPatPtr(0) = tmp / 256
     gPatPtr(1) = tmp AND $FF
     CALL read_byte_asm
     hiB = gNoteDiv(0)
 
+    ' Leggi lo byte offset patIdx
     tmp        = tmp + 1
     gPatPtr(0) = tmp / 256
     gPatPtr(1) = tmp AND $FF
     CALL read_byte_asm
     loB = gNoteDiv(0)
 
-    offA = hiB * 256 + loB
-
-    ' Leggi offset del pattern successivo (sentinella = fine file se ultimo)
-    tmp        = base + 1 + patIdx * 2
-    gPatPtr(0) = tmp / 256
-    gPatPtr(1) = tmp AND $FF
-    CALL read_byte_asm
-    hiB = gNoteDiv(0)
-
-    tmp        = tmp + 1
-    gPatPtr(0) = tmp / 256
-    gPatPtr(1) = tmp AND $FF
-    CALL read_byte_asm
-    loB = gNoteDiv(0)
-
-    offB = hiB * 256 + loB
-
-    ' Se patIdx e l'ultimo, offB potrebbe essere 0 -> usa SIZE(patFile)
-    IF offB = 0 THEN
-        offB = SIZE(patFile)
-    END IF
-
-    nNotes = (offB - offA) / 4
-    IF nNotes > 16 THEN nNotes = 16   ' protezione overflow gPat
-    gNNotes(0) = nNotes
-
-    ' Copia le note in gPat byte per byte
-    FOR i = 0 TO nNotes * 4 - 1
-        tmp        = base + offA + i
-        gPatPtr(0) = tmp / 256
-        gPatPtr(1) = tmp AND $FF
-        CALL read_byte_asm
-        gPat(i) = gNoteDiv(0)
-    NEXT i
+    ' Per ora non usiamo hiB/loB - gPat e gNNotes restano hardcodati
 END PROC
 
 
