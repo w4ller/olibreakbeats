@@ -35,12 +35,21 @@ END PROC
 
 ' =============================================================================
 ' LOAD_PATTERN[patIdx]
-' DEBUG: VARBANK + VARBANKPTR
+' DEBUG: calcolo tmp + prima read_byte_asm
 ' =============================================================================
 PROCEDURE load_pattern[patIdx AS BYTE]
     DIM base AS ADDRESS
+    DIM tmp  AS ADDRESS
+    DIM hiB  AS INTEGER
+
     gPatBank(0) = VARBANK(patFile)
     base        = VARBANKPTR(patFile)
+
+    tmp        = base + 1 + (patIdx - 1) * 2
+    gPatPtr(0) = tmp / 256
+    gPatPtr(1) = tmp AND $FF
+    CALL read_byte_asm
+    hiB = gNoteDiv(0)
 END PROC
 
 
