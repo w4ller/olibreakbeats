@@ -35,40 +35,15 @@ END PROC
 
 ' =============================================================================
 ' LOAD_PATTERN[patIdx]
-' DEBUG: legge solo gli offset da patterns.bin, non copia ancora niente.
-' gPat e gNNotes restano hardcodati in main.
+' DEBUG: corpo quasi vuoto, solo VARBANK per isolare il crash.
 ' =============================================================================
 PROCEDURE load_pattern[patIdx AS BYTE]
-    DIM base   AS ADDRESS
-    DIM tmp    AS ADDRESS
-    DIM hiB    AS INTEGER
-    DIM loB    AS INTEGER
-
     gPatBank(0) = VARBANK(patFile)
-    base        = VARBANKPTR(patFile)
-
-    ' Leggi hi byte offset patIdx
-    tmp        = base + 1 + (patIdx - 1) * 2
-    gPatPtr(0) = tmp / 256
-    gPatPtr(1) = tmp AND $FF
-    CALL read_byte_asm
-    hiB = gNoteDiv(0)
-
-    ' Leggi lo byte offset patIdx
-    tmp        = tmp + 1
-    gPatPtr(0) = tmp / 256
-    gPatPtr(1) = tmp AND $FF
-    CALL read_byte_asm
-    loB = gNoteDiv(0)
-
-    ' Per ora non usiamo hiB/loB - gPat e gNNotes restano hardcodati
 END PROC
 
 
 ' =============================================================================
 ' PLAY_PATTERN
-' Suona gNNotes note dall'array globale gPat.
-' Formato: [div, idx, stepHi, stepLo] x gNNotes
 ' =============================================================================
 PROCEDURE play_pattern
     DIM n AS BYTE
