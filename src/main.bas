@@ -1,6 +1,6 @@
 ' =============================================================================
 ' olibreakbeats - main.bas   v0.9  TEST
-' Debug: load_pattern legge solo offset, gPat/gNNotes ancora hardcodati.
+' Test: legge gNPat da file, carica pattern 1 con load_pattern, suona in loop.
 ' =============================================================================
 
 INCLUDE "src/globals.bas"
@@ -10,14 +10,12 @@ INCLUDE "src/player.bas"
 
 CALL init_dac
 
-' gPat hardcodato - funzionava prima
-gPat(0)  = $FF : gPat(1)  = 4 : gPat(2)  = 1 : gPat(3)  = 0
-gPat(4)  = $FF : gPat(5)  = 4 : gPat(6)  = 1 : gPat(7)  = 0
-gPat(8)  = $FF : gPat(9)  = 4 : gPat(10) = 1 : gPat(11) = 0
-gPat(12) = $FF : gPat(13) = 4 : gPat(14) = 1 : gPat(15) = 0
-gNNotes(0) = 4
+' Leggi numero pattern dal byte 0 di patterns.bin
+DIM tmp(1) AS BYTE FOR BANK READ
+BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(tmp) SIZE 1
+gNPat(0) = tmp(0)
 
-' Chiama load_pattern solo per testare che non crashi
+' Carica pattern 1 in gPat
 CALL load_pattern[1]
 
 DO
