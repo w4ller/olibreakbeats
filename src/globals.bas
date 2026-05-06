@@ -26,11 +26,11 @@ DIM gFracAcc   (1) AS BYTE FOR BANK READ : GLOBAL gFracAcc
 DIM gWavBank   (1) AS BYTE FOR BANK READ : GLOBAL gWavBank
 
 ' --- Contatore pattern totali (letto da init_patterns) ---
-DIM gNPat    (1) AS BYTE : GLOBAL gNPat   ' numero pattern nel file
+DIM gNPat    (1) AS BYTE : GLOBAL gNPat   :' numero pattern nel file
 
 ' --- Pattern corrente: offset e numero righe (letti da load_pattern) ---
-DIM gPatOffset AS INTEGER : GLOBAL gPatOffset  ' offset assoluto nel file
-DIM gNRows     AS BYTE    : GLOBAL gNRows       ' numero righe del pattern corrente
+DIM gPatOffset AS INTEGER : GLOBAL gPatOffset  :' offset assoluto nel file
+DIM gNRows     AS BYTE    : GLOBAL gNRows       :' numero righe del pattern corrente
 
 ' --- Buffer singola riga (8 byte) letta riga per riga durante play_pattern ---
 DIM gRow (8) AS BYTE FOR BANK READ : GLOBAL gRow

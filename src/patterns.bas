@@ -11,7 +11,7 @@
 PROCEDURE init_patterns
     DIM tmp (1) AS BYTE FOR BANK READ
     BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) TO VARPTR(tmp) SIZE 1
-    gNPat = tmp(0)
+    gNPat(0) = tmp(0)
 END PROC
 
 
@@ -47,6 +47,6 @@ PROCEDURE play_pattern
     DIM i AS BYTE
     FOR i = 0 TO gNRows - 1
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
-        play_note[gRow(0), gRow(1), gRow(2), gRow(3)]
+        play_note[gRow(1), gRow(0), gRow(2), gRow(3)]
     NEXT i
 END PROC
