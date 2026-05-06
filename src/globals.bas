@@ -3,12 +3,11 @@
 ' =============================================================================
 '
 ' patterns.bin format:
-'   byte 0        : N = number of patterns (1..255)
-'   byte 1..2     : offset pattern 1 (big-endian WORD, relativo a byte 0)
-'   byte 3..4     : offset pattern 2
-'   ...
-'   dati note     : [div, idx, stepHi, stepLo] x N
-'                   idx=$FF = random chunk
+'   byte 0          : N = number of patterns (1..255)
+'   byte 1..N*3     : per ogni pattern: WORD big-endian offset assoluto + BYTE row_count
+'   dati righe      : [div, idx, stepHi, stepLo, 0, 0, 0, 0] x row_count
+'                     idx=$FF = random chunk
+'                     ultimi 4 byte riservati per effetti futuri
 ' =============================================================================
 
 ' --- Banked assets ---
@@ -26,10 +25,12 @@ DIM gStepLo    (1) AS BYTE FOR BANK READ : GLOBAL gStepLo
 DIM gFracAcc   (1) AS BYTE FOR BANK READ : GLOBAL gFracAcc
 DIM gWavBank   (1) AS BYTE FOR BANK READ : GLOBAL gWavBank
 
-' --- Contatore pattern (letto da file all avvio) ---
-DIM gNPat   (1) AS BYTE FOR BANK READ : GLOBAL gNPat
-DIM gCurPat (1) AS BYTE FOR BANK READ : GLOBAL gCurPat
+' --- Contatore pattern totali (letto da init_patterns) ---
+DIM gNPat    (1) AS BYTE : GLOBAL gNPat   ' numero pattern nel file
 
-' --- Pattern corrente in RAM normale ---
-DIM gPat    (64) AS BYTE : GLOBAL gPat    :' max 16 note x 4 byte
-DIM gNNotes (1)  AS BYTE : GLOBAL gNNotes :' numero note nel pattern corrente
+' --- Pattern corrente: offset e numero righe (letti da load_pattern) ---
+DIM gPatOffset AS INTEGER : GLOBAL gPatOffset  ' offset assoluto nel file
+DIM gNRows     AS BYTE    : GLOBAL gNRows       ' numero righe del pattern corrente
+
+' --- Buffer singola riga (8 byte) letta riga per riga durante play_pattern ---
+DIM gRow (8) AS BYTE FOR BANK READ : GLOBAL gRow
