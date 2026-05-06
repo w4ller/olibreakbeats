@@ -2,7 +2,7 @@
 """
 pat2bin.py  —  CSV pattern compiler per olibreakbeats / Thomson MO6 PC128
 --------------------------------------------------------------------------
-Produce un singolo file binario con header di offset.
+Produce un singolo file binario con header di offset + row count.
 
 Formato CSV (con header obbligatorio, righe # = commenti):
   pattern,div,idx,semi
@@ -15,21 +15,23 @@ Formato CSV (con header obbligatorio, righe # = commenti):
   semi    : -24 .. +24
 
 Formato binario output (patterns.bin):
-  byte  0       : N = numero di pattern nel file (1..255)
-  byte  1..2    : WORD big-endian, offset assoluto pattern 1
-  byte  3..4    : WORD big-endian, offset assoluto pattern 2
+  byte  0         : N = numero di pattern nel file (1..255)
+  byte  1..3      : 3 byte per pattern 1: WORD big-endian offset assoluto + BYTE row_count
+  byte  4..6      : 3 byte per pattern 2: WORD big-endian offset assoluto + BYTE row_count
   ...
-  byte  N*2-1   : ultimo offset
+  byte  N*3-1     : ultimo gruppo
   --- dati ---
-  ogni pattern  : note da 4 byte ciascuna, NESSUN terminatore
-  ogni nota     : DIV  IDX  STEP_HI  STEP_LO
+  ogni pattern    : righe da 8 byte ciascuna, NESSUN terminatore
+  ogni riga       : DIV  IDX  STEP_HI  STEP_LO  0x00  0x00  0x00  0x00
+                    (ultimi 4 byte riservati per effetti futuri)
 
   IDX = 255 ($FF) = chunk casuale scelto a runtime tra 0..DIV-1.
 
   Offset e' assoluto dall'inizio del file.
-  Header size = 1 + N*2 byte.
-  Numero note pattern i = (offset(i+1) - offset(i)) / 4
-  Numero note ultimo    = (file_size   - offset(N)) / 4
+  Header size = 1 + N*3 byte.
+  Numero righe pattern i = row_count letto direttamente dall'header (no calcoli).
+
+  Limite hardware: il file deve stare in un singolo BANK (max 16 KB = 16384 byte).
 
 Uso:
   python tools/pat2bin.py patterns/patterns.csv assets/patterns.bin
@@ -39,8 +41,10 @@ Uso:
 
 import csv, math, os, sys, argparse, struct
 
-VALID_DIVS = {1, 2, 4, 8, 16, 32, 64}
-IDX_RANDOM = 255   # valore speciale: chunk casuale a runtime
+VALID_DIVS  = {1, 2, 4, 8, 16, 32, 64}
+IDX_RANDOM  = 255        # valore speciale: chunk casuale a runtime
+ROW_BYTES   = 8          # byte per riga: 4 dati + 4 riservati
+MAX_BANK    = 16 * 1024  # 16384 byte — limite BANK hardware
 
 
 def semi_to_step88(semi: int) -> tuple:
@@ -75,7 +79,6 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
             if div not in VALID_DIVS:
                 errors.append(f"  riga {lineno}: div={div} non valido {sorted(VALID_DIVS)}")
                 continue
-            # idx=255 e' sempre valido (RND); altrimenti deve essere 0..div-1
             if idx != IDX_RANDOM and not (0 <= idx < div):
                 errors.append(f"  riga {lineno}: idx={idx} fuori range 0..{div-1} per div={div}")
                 continue
@@ -88,7 +91,8 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
             if verbose:
                 print(f"  pat={pat_id} div={div:2d} idx={idx_str:>3} semi={semi:+3d} "
                       f"-> ${shi:02X}${slo:02X} ({2**(semi/12):.4f}x)")
-            patterns.setdefault(pat_id, []).append(bytes([div, idx, shi, slo]))
+            # 4 byte dati + 4 byte riservati
+            patterns.setdefault(pat_id, []).append(bytes([div, idx, shi, slo, 0, 0, 0, 0]))
 
     if errors:
         print("ERRORI CSV:")
@@ -102,13 +106,16 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
 def build_binary(patterns: dict) -> bytes:
     """
     Assembla header + dati in un unico blob binario.
-      byte 0      : N (numero pattern)
-      byte 1..2*N : N x WORD big-endian offset assoluto
+
+      byte 0          : N (numero pattern)
+      byte 1..N*3     : N x [WORD big-endian offset assoluto, BYTE row_count]
       poi dati pattern consecutivi, nessun terminatore
+
+    Verifica che il risultato stia nel BANK hardware (max 16 KB).
     """
     pat_list    = list(patterns.values())
     n           = len(pat_list)
-    header_size = 1 + n * 2
+    header_size = 1 + n * 3
 
     offsets = []
     cur = header_size
@@ -116,41 +123,49 @@ def build_binary(patterns: dict) -> bytes:
         offsets.append(cur)
         cur += len(data)
 
-    if cur > 65535:
-        print(f"ATTENZIONE: file totale {cur} byte supera 65535 — offset WORD overflow.")
-
     header = bytes([n])
-    for off in offsets:
-        header += struct.pack('>H', off)
+    for off, data in zip(offsets, pat_list):
+        row_count = len(data) // ROW_BYTES
+        if row_count > 255:
+            print(f"ERRORE: un pattern ha {row_count} righe, massimo consentito 255.")
+            sys.exit(1)
+        header += struct.pack('>H', off) + bytes([row_count])
 
-    return header + b''.join(pat_list)
+    blob = header + b''.join(pat_list)
+
+    # Controllo limite BANK hardware
+    if len(blob) > MAX_BANK:
+        print(f"ERRORE: file {len(blob)} byte supera il limite BANK di {MAX_BANK} byte "
+              f"({len(blob) - MAX_BANK} byte in eccesso). Riduci pattern o righe.")
+        sys.exit(1)
+    elif len(blob) > MAX_BANK * 0.9:
+        print(f"ATTENZIONE: file {len(blob)} byte — vicino al limite BANK "
+              f"({MAX_BANK} byte). Margine residuo: {MAX_BANK - len(blob)} byte.")
+
+    return blob
 
 
 def dump_binary(blob: bytes):
     """Stampa una decodifica leggibile del file binario."""
-    file_size = len(blob)
     n = blob[0]
-    header_size = 1 + n * 2
+    header_size = 1 + n * 3
     print(f"\n  Header: {n} pattern, {header_size} byte")
 
-    offsets = []
+    entries = []
     for i in range(n):
-        off = struct.unpack('>H', blob[1 + i*2 : 3 + i*2])[0]
-        offsets.append(off)
-
-    for i, off in enumerate(offsets):
-        end        = offsets[i+1] if i+1 < n else file_size
-        note_count = (end - off) // 4
-        print(f"  pattern {i+1}: offset ${off:04X}  note={note_count}  byte={end-off}")
+        base      = 1 + i * 3
+        off       = struct.unpack('>H', blob[base:base+2])[0]
+        row_count = blob[base+2]
+        entries.append((off, row_count))
+        print(f"  pattern {i+1}: offset ${off:04X}  righe={row_count}  byte={row_count * ROW_BYTES}")
 
     print()
-    for i, off in enumerate(offsets):
-        end  = offsets[i+1] if i+1 < n else file_size
-        data = blob[off:end]
-        note_count = len(data) // 4
-        print(f"  -- pattern {i+1} [{note_count} note] --")
-        for j in range(note_count):
-            d, idx, shi, slo = data[j*4], data[j*4+1], data[j*4+2], data[j*4+3]
+    for i, (off, row_count) in enumerate(entries):
+        data = blob[off : off + row_count * ROW_BYTES]
+        print(f"  -- pattern {i+1} [{row_count} righe] --")
+        for j in range(row_count):
+            base_r       = j * ROW_BYTES
+            d, idx, shi, slo = data[base_r], data[base_r+1], data[base_r+2], data[base_r+3]
             raw     = shi * 256 + slo
             semi    = round(12 * math.log2(raw / 256)) if raw > 0 else 0
             idx_str = "RND" if idx == IDX_RANDOM else str(idx)
@@ -179,11 +194,13 @@ def main():
         f.write(blob)
 
     ids         = list(patterns.keys())
-    header_size = 1 + len(ids) * 2
+    header_size = 1 + len(ids) * 3
+    total_rows  = sum(len(d) // ROW_BYTES for d in patterns.values())
     print(f"  Pattern IDs  : {ids}")
-    print(f"  Header       : {header_size} byte  (1 + {len(ids)}x2)")
-    print(f"  Dati         : {len(blob) - header_size} byte")
-    print(f"  Totale       : {len(blob)} byte  ({len(blob)/1024:.2f} KB)")
+    print(f"  Header       : {header_size} byte  (1 + {len(ids)}x3)")
+    print(f"  Righe totali : {total_rows}  x{ROW_BYTES} byte = {total_rows * ROW_BYTES} byte dati")
+    print(f"  Totale       : {len(blob)} byte  ({len(blob)/1024:.2f} KB)  "
+          f"[BANK: {len(blob)*100//MAX_BANK}% usato]")
     print(f"  Output       : {args.output}")
 
     if args.dump:
