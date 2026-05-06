@@ -38,8 +38,6 @@ PCH_DLY:
 END PROC
 
 
-
-
 ' =============================================================================
 ' PLAY_NOTE  [chunkIdx, chunkDiv, stepHi, stepLo]
 ' chunkIdx = $FF -> random chunk in 0..chunkDiv-1

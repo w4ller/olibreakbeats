@@ -5,8 +5,8 @@
 
 ' =============================================================================
 ' INIT_PATTERNS
-' Legge il byte 0 di patterns.bin e salva il numero di pattern in gNPat.
-' Va chiamata una volta sola all avvio, prima di qualsiasi load_pattern.
+' Reads byte 0 of patterns.bin and stores the pattern count in gNPat.
+' Must be called once at startup, before any call to load_pattern.
 ' =============================================================================
 PROCEDURE init_patterns
     DIM tmp (1) AS BYTE FOR BANK READ
@@ -17,18 +17,18 @@ END PROC
 
 ' =============================================================================
 ' LOAD_PATTERN[patIdx]
-' Legge dall header i 3 byte del pattern patIdx e salva:
-'   gPatOffset  = offset assoluto del primo byte dati nel file
-'   gNRows      = numero di righe del pattern
-' Non carica dati audio: la lettura avviene riga per riga in play_pattern.
-' patIdx e' 0-based (0 = primo pattern).
+' Reads the 3-byte header entry for pattern patIdx and stores:
+'   gPatOffset  = absolute offset of the first data byte in the file
+'   gNRows      = number of rows in the pattern
+' No audio data is loaded here: rows are read one by one inside play_pattern.
+' patIdx is 0-based (0 = first pattern).
 ' =============================================================================
 PROCEDURE load_pattern[patIdx AS BYTE]
-    DIM hdr (3) AS BYTE FOR BANK READ
-    DIM base  AS INTEGER
+    DIM hdr  (3) AS BYTE FOR BANK READ
+    DIM base AS INTEGER
 
-    ' Ogni entry header = 3 byte: [offHi, offLo, rowCount]
-    ' base = 1 (skip N) + patIdx * 3
+    ' Header entry layout: [offHi, offLo, rowCount]
+    ' base = 1 (skip N byte) + patIdx * 3
     base = 1 + patIdx * 3
     BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + base TO VARPTR(hdr) SIZE 3
 
@@ -39,9 +39,9 @@ END PROC
 
 ' =============================================================================
 ' PLAY_PATTERN
-' Suona il pattern corrente riga per riga leggendo direttamente dal BANK.
-' Per ogni riga legge 8 byte in gRow e passa i primi 4 a play_note.
-' I byte gRow(4..7) sono riservati e ignorati.
+' Plays the current pattern row by row, reading directly from the BANK.
+' For each row: reads 8 bytes into gRow, passes the first 4 to play_note.
+' Bytes gRow(4..7) are reserved and ignored.
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i AS BYTE

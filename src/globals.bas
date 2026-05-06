@@ -4,10 +4,10 @@
 '
 ' patterns.bin format:
 '   byte 0          : N = number of patterns (1..255)
-'   byte 1..N*3     : per ogni pattern: WORD big-endian offset assoluto + BYTE row_count
-'   dati righe      : [div, idx, stepHi, stepLo, 0, 0, 0, 0] x row_count
-'                     idx=$FF = random chunk
-'                     ultimi 4 byte riservati per effetti futuri
+'   byte 1..N*3     : for each pattern: WORD big-endian absolute offset + BYTE row_count
+'   row data        : [div, idx, stepHi, stepLo, 0, 0, 0, 0] x row_count
+'                     idx=$FF = random chunk chosen at runtime
+'                     last 4 bytes reserved for future use
 ' =============================================================================
 
 ' --- Banked assets ---
@@ -17,7 +17,7 @@ wave := LOAD("assets/amen150.bin") BANKED
 GLOBAL patFile
 patFile := LOAD("assets/patterns.bin") BANKED
 
-' --- WAV player ASM interface (sotto $6000, safe from bank swap) ---
+' --- WAV player ASM interface (below $6000, safe from bank swap) ---
 DIM gWaveBase  (2) AS BYTE FOR BANK READ : GLOBAL gWaveBase
 DIM gChunkSize (2) AS BYTE FOR BANK READ : GLOBAL gChunkSize
 DIM gStepHi    (1) AS BYTE FOR BANK READ : GLOBAL gStepHi
@@ -25,12 +25,12 @@ DIM gStepLo    (1) AS BYTE FOR BANK READ : GLOBAL gStepLo
 DIM gFracAcc   (1) AS BYTE FOR BANK READ : GLOBAL gFracAcc
 DIM gWavBank   (1) AS BYTE FOR BANK READ : GLOBAL gWavBank
 
-' --- Contatore pattern totali (letto da init_patterns) ---
-DIM gNPat    (1) AS BYTE : GLOBAL gNPat   :' numero pattern nel file
+' --- Total pattern count (set by init_patterns) ---
+DIM gNPat      (1) AS BYTE : GLOBAL gNPat   :' number of patterns in the file
 
-' --- Pattern corrente: offset e numero righe (letti da load_pattern) ---
-DIM gPatOffset AS INTEGER : GLOBAL gPatOffset  :' offset assoluto nel file
-DIM gNRows     AS BYTE    : GLOBAL gNRows       :' numero righe del pattern corrente
+' --- Current pattern: absolute offset and row count (set by load_pattern) ---
+DIM gPatOffset AS INTEGER  : GLOBAL gPatOffset  :' absolute offset into the file
+DIM gNRows     AS BYTE     : GLOBAL gNRows       :' number of rows in current pattern
 
-' --- Buffer singola riga (8 byte) letta riga per riga durante play_pattern ---
+' --- Single row buffer (8 bytes), read one row at a time during play_pattern ---
 DIM gRow (8) AS BYTE FOR BANK READ : GLOBAL gRow
