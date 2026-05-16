@@ -1,6 +1,6 @@
 ' =============================================================================
 ' olibreakbeats - main.bas
-' Startup: init_patterns reads gNPat, then loops through all patterns
+' Startup: init_waves + init_patterns, then loops through all patterns
 ' calling load_pattern + play_pattern for each one.
 ' =============================================================================
 
@@ -10,6 +10,7 @@ INCLUDE "src/player.bas"
 INCLUDE "src/patterns.bas"
 
 CALL init_dac
+CALL init_waves
 
 ' Read total pattern count from byte 0 of patterns.bin
 CALL init_patterns

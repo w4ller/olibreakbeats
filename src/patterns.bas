@@ -40,13 +40,15 @@ END PROC
 ' =============================================================================
 ' PLAY_PATTERN
 ' Plays the current pattern row by row, reading directly from the BANK.
-' For each row: reads 8 bytes into gRow, passes the first 4 to play_note.
-' Bytes gRow(4..7) are reserved and ignored.
+' For each row: reads 8 bytes into gRow, passes all 5 fields to play_note.
+' Row format: [div, idx, stepHi, stepLo, waveId, 0, 0, 0]
+'   waveId=0..$04 = fixed wave; $FF = random wave
+' Bytes gRow(5..7) are reserved and ignored.
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i AS BYTE
     FOR i = 0 TO gNRows - 1
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
-        play_note[gRow(1), gRow(0), gRow(2), gRow(3)]
+        play_note[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4)]
     NEXT i
 END PROC
