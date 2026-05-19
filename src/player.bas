@@ -39,27 +39,37 @@ END PROC
 
 
 ' =============================================================================
-' PLAY_NOTE  [chunkIdx, chunkDiv, stepHi, stepLo]
+' PLAY_NOTE  [chunkIdx, chunkDiv, stepHi, stepLo, waveId]
 ' chunkIdx = $FF -> random chunk in 0..chunkDiv-1
 ' chunkDiv = number of equal slices the wave is divided into
 ' stepHi/Lo = 8.8 fixed-point pitch multiplier
+' waveId   = 0..4 selects wave; $FF = random among 5 waves
 ' =============================================================================
-PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE]
+PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
     DIM actualIdx AS BYTE
     DIM addr      AS ADDRESS
     DIM sz        AS INTEGER
+    DIM wId       AS BYTE
+
+    IF waveId = $FF THEN
+        wId = RND(5)    :' random wave 0..4
+    ELSE
+        wId = waveId
+    ENDIF
+
     IF chunkIdx = $FF THEN
         actualIdx = RND(chunkDiv)   :' random slice 0..chunkDiv-1
     ELSE
         actualIdx = chunkIdx
     ENDIF
+
     sz            = 9600 / chunkDiv
     gChunkSize(0) = sz / 256
     gChunkSize(1) = sz AND $FF
-    addr          = VARBANKPTR(wave) + (sz * actualIdx)
+    addr          = waveAddress(wId) + (sz * actualIdx) :' O(1) lookup, no IF chain
     gWaveBase(0)  = addr / 256
     gWaveBase(1)  = addr AND $FF
-    gWavBank(0)   = VARBANK(wave)
+    gWavBank(0)   = wavBank(wId)
     gStepHi(0)    = stepHi
     gStepLo(0)    = stepLo
     CALL play_chunk_asm

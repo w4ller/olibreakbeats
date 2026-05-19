@@ -5,14 +5,17 @@ pat2bin.py  —  CSV pattern compiler per olibreakbeats / Thomson MO6 PC128
 Produce un singolo file binario con header di offset + row count.
 
 Formato CSV (con header obbligatorio, righe # = commenti):
-  pattern,div,idx,semi
-  1,4,0,0
-  1,8,3,+1
+  pattern,div,idx,semi,wave
+  1,4,0,0,0
+  1,8,3,+1,255
+  2,4,0,0,1
 
   pattern : ID numerico, qualsiasi ordine, qualsiasi valore >= 1
   div     : 1 2 4 8 16 32 64
   idx     : 0 .. div-1  oppure 255 (= RND: chunk casuale a runtime)
   semi    : -24 .. +24
+  wave    : 0..4 (seleziona wave fisso) oppure 255 (= RND: wave casuale a runtime)
+            colonna opzionale: default 0 (backward compatible con CSV senza wave)
 
 Formato binario output (patterns.bin):
   byte  0         : N = numero di pattern nel file (1..255)
@@ -22,10 +25,12 @@ Formato binario output (patterns.bin):
   byte  N*3-1     : ultimo gruppo
   --- dati ---
   ogni pattern    : righe da 8 byte ciascuna, NESSUN terminatore
-  ogni riga       : DIV  IDX  STEP_HI  STEP_LO  0x00  0x00  0x00  0x00
-                    (ultimi 4 byte riservati per effetti futuri)
+  ogni riga       : DIV  IDX  STEP_HI  STEP_LO  WAVE_ID  0x00  0x00  0x00
+                    (ultimi 3 byte riservati per effetti futuri)
 
-  IDX = 255 ($FF) = chunk casuale scelto a runtime tra 0..DIV-1.
+  IDX     = 255 ($FF) = chunk casuale scelto a runtime tra 0..DIV-1.
+  WAVE_ID = 255 ($FF) = wave casuale scelto a runtime tra 0..4.
+  WAVE_ID = 0         = default (backward compatible con vecchi pattern).
 
   Offset e' assoluto dall'inizio del file.
   Header size = 1 + N*3 byte.
@@ -43,7 +48,9 @@ import csv, math, os, sys, argparse, struct
 
 VALID_DIVS  = {1, 2, 4, 8, 16, 32, 64}
 IDX_RANDOM  = 255        # valore speciale: chunk casuale a runtime
-ROW_BYTES   = 8          # byte per riga: 4 dati + 4 riservati
+WAVE_RANDOM = 255        # valore speciale: wave casuale a runtime
+N_WAVES     = 5          # wave0..wave4
+ROW_BYTES   = 8          # byte per riga: 5 dati + 3 riservati
 MAX_BANK    = 16 * 1024  # 16384 byte — limite BANK hardware
 
 
@@ -69,6 +76,8 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
                 div    = int(row['div'].strip())
                 idx    = int(row['idx'].strip())
                 semi   = int(row['semi'].strip())
+                wave_raw = row.get('wave', '0').strip() or '0'
+                wave   = int(wave_raw)
             except (ValueError, KeyError) as e:
                 errors.append(f"  riga {lineno}: {e}")
                 continue
@@ -85,14 +94,18 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
             if not (-24 <= semi <= 24):
                 errors.append(f"  riga {lineno}: semi={semi} fuori range -24..+24")
                 continue
+            if wave != WAVE_RANDOM and not (0 <= wave < N_WAVES):
+                errors.append(f"  riga {lineno}: wave={wave} fuori range 0..{N_WAVES-1} (o 255=RND)")
+                continue
 
             shi, slo = semi_to_step88(semi)
-            idx_str  = "RND" if idx == IDX_RANDOM else str(idx)
+            idx_str  = "RND" if idx  == IDX_RANDOM  else str(idx)
+            wav_str  = "RND" if wave == WAVE_RANDOM  else str(wave)
             if verbose:
                 print(f"  pat={pat_id} div={div:2d} idx={idx_str:>3} semi={semi:+3d} "
-                      f"-> ${shi:02X}${slo:02X} ({2**(semi/12):.4f}x)")
-            # 4 byte dati + 4 byte riservati
-            patterns.setdefault(pat_id, []).append(bytes([div, idx, shi, slo, 0, 0, 0, 0]))
+                      f"-> ${shi:02X}${slo:02X} ({2**(semi/12):.4f}x)  wave={wav_str}")
+            # 5 byte dati + 3 byte riservati
+            patterns.setdefault(pat_id, []).append(bytes([div, idx, shi, slo, wave, 0, 0, 0]))
 
     if errors:
         print("ERRORI CSV:")
@@ -133,7 +146,6 @@ def build_binary(patterns: dict) -> bytes:
 
     blob = header + b''.join(pat_list)
 
-    # Controllo limite BANK hardware
     if len(blob) > MAX_BANK:
         print(f"ERRORE: file {len(blob)} byte supera il limite BANK di {MAX_BANK} byte "
               f"({len(blob) - MAX_BANK} byte in eccesso). Riduci pattern o righe.")
@@ -164,12 +176,13 @@ def dump_binary(blob: bytes):
         data = blob[off : off + row_count * ROW_BYTES]
         print(f"  -- pattern {i+1} [{row_count} righe] --")
         for j in range(row_count):
-            base_r       = j * ROW_BYTES
-            d, idx, shi, slo = data[base_r], data[base_r+1], data[base_r+2], data[base_r+3]
+            base_r              = j * ROW_BYTES
+            d, idx, shi, slo, wave_id = data[base_r], data[base_r+1], data[base_r+2], data[base_r+3], data[base_r+4]
             raw     = shi * 256 + slo
             semi    = round(12 * math.log2(raw / 256)) if raw > 0 else 0
-            idx_str = "RND" if idx == IDX_RANDOM else str(idx)
-            print(f"       div={d:2d}  idx={idx_str:>3}  step=${shi:02X}${slo:02X}  semi={semi:+d}")
+            idx_str  = "RND" if idx     == IDX_RANDOM  else str(idx)
+            wave_str = "RND" if wave_id == WAVE_RANDOM  else str(wave_id)
+            print(f"       div={d:2d}  idx={idx_str:>3}  step=${shi:02X}${slo:02X}  semi={semi:+d}  wave={wave_str}")
 
 
 def main():
