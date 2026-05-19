@@ -74,3 +74,44 @@ PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo A
     gStepLo(0)    = stepLo
     CALL play_chunk_asm
 END PROC
+
+
+' =============================================================================
+' PLAY_NOTE_STUTTER  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode]
+' Ripete play_note N volte sullo stesso chunk per ottenere l effetto stutter.
+'
+' stutterMode:
+'   $00 = 1x  (nessuno stutter, comportamento normale)
+'   $01 = 2x  (ripeti 2 volte)
+'   $02 = 4x  (ripeti 4 volte)
+'   $03 = 8x  (ripeti 8 volte)
+'   $FF = RND: sceglie casualmente tra 1x, 2x, 4x a runtime
+'
+' Nota: la durata totale dello step e' moltiplicata per reps.
+' Per mantenere il ritmo usare div proporzionalmente piu alto.
+' =============================================================================
+PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
+    DIM reps AS BYTE
+    DIM sm   AS BYTE
+    DIM r    AS BYTE
+
+    IF stutterMode = $FF THEN
+        sm = RND(3)   :' 0=1x, 1=2x, 2=4x (random tra i tre modi base)
+    ELSE
+        sm = stutterMode
+    ENDIF
+
+    IF sm = 0 THEN
+        reps = 1
+    ELSE IF sm = 1 THEN
+        reps = 2
+    ELSE IF sm = 2 THEN
+        reps = 4
+    ELSE
+        reps = 8
+    ENDIF
+
+    FOR r = 1 TO reps
+        play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
+    NEXT r
+END PROC

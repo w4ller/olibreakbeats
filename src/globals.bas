@@ -5,11 +5,16 @@
 ' patterns.bin format:
 '   byte 0          : N = number of patterns (1..255)
 '   byte 1..N*3     : for each pattern: WORD big-endian absolute offset + BYTE row_count
-'   row data        : [div, idx, stepHi, stepLo, waveId, 0, 0, 0] x row_count
-'                     idx=$FF    = random chunk chosen at runtime
-'                     waveId=$FF = random wave chosen at runtime (0..4)
-'                     waveId=0   = default (backward compatible with old patterns)
-'                     last 3 bytes reserved for future use
+'   row data        : [div, idx, stepHi, stepLo, waveId, stutterMode, 0, 0] x row_count
+'                     idx=$FF        = random chunk chosen at runtime
+'                     waveId=$FF     = random wave chosen at runtime (0..4)
+'                     waveId=0       = default (backward compatible with old patterns)
+'                     stutterMode=$00 = no stutter, 1x (default, backward compatible)
+'                     stutterMode=$01 = stutter 2x
+'                     stutterMode=$02 = stutter 4x
+'                     stutterMode=$03 = stutter 8x
+'                     stutterMode=$FF = random stutter chosen at runtime (1x/2x/4x)
+'                     byte 6..7 reserved for future use
 ' =============================================================================
 
 ' --- Banked assets ---
