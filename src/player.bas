@@ -78,24 +78,26 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE_STUTTER  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode]
-' Ripete play_note N volte sullo stesso chunk per ottenere l effetto stutter.
+' Ripete lo stesso micro-chunk N volte (loop stutter proporzionale).
 '
 ' stutterMode:
 '   $00 = 1x  (nessuno stutter, comportamento normale)
-'   $01 = 2x  (ripeti 2 volte)
-'   $02 = 4x  (ripeti 4 volte)
-'   $03 = 8x  (ripeti 8 volte)
-'   $FF = RND: sceglie casualmente tra 1x, 2x, 4x a runtime
+'   $01 = 2x  (ripeti 2 volte, newDiv = chunkDiv*2)
+'   $02 = 4x  (ripeti 4 volte, newDiv = chunkDiv*4)
+'   $03 = 8x  (ripeti 8 volte, newDiv = chunkDiv*8)
+'   $FF = RND: sceglie casualmente tra sm=0,1,2 a runtime
 '
-' Nota: la durata totale dello step e' moltiplicata per reps.
-' Per mantenere il ritmo usare div proporzionalmente piu alto.
+' Il chunk viene suddiviso proporzionalmente: newDiv = chunkDiv * reps.
+' baseIdx viene scalato di conseguenza, cosi la porzione audio e identica.
+' idx=$FF viene risolto una volta sola prima del loop (stutter coerente).
+' Richiede init_stutter chiamato una volta a startup.
 ' =============================================================================
 PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
-    DIM reps    AS BYTE
     DIM sm      AS BYTE
     DIM r       AS BYTE
     DIM newDiv  AS BYTE
     DIM baseIdx AS BYTE
+    DIM reps    AS BYTE
 
     IF stutterMode = $FF THEN
         sm = RND(3)   :' 0=1x, 1=2x, 2=4x
@@ -103,20 +105,12 @@ PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, 
         sm = stutterMode
     ENDIF
 
-    IF sm = 0 THEN
-        reps = 1
-    ELSE IF sm = 1 THEN
-        reps = 2
-    ELSE IF sm = 2 THEN
-        reps = 4
-    ELSE
-        reps = 8
-    ENDIF
+    reps = stutterReps(sm)  :' O(1) lookup, no IF chain
 
     IF reps = 1 THEN
         play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
     ELSE
-        newDiv  = chunkDiv * reps
+        newDiv = chunkDiv * reps
 
         IF chunkIdx = $FF THEN
             baseIdx = RND(chunkDiv) * reps  :' risolvi RND su div originale, poi scala

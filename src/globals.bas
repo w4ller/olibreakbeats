@@ -54,6 +54,10 @@ DIM gNRows     AS BYTE     : GLOBAL gNRows       :' number of rows in current pa
 ' --- Single row buffer (8 bytes), read one row at a time during play_pattern ---
 DIM gRow (8) AS BYTE FOR BANK READ : GLOBAL gRow
 
+' --- Stutter reps lookup table (init by init_stutter) ---
+' Index = stutterMode (0..3): 0->1x, 1->2x, 2->4x, 3->8x
+DIM stutterReps (4) AS BYTE : GLOBAL stutterReps
+
 
 ' =============================================================================
 ' INIT_WAVES
@@ -66,4 +70,17 @@ PROCEDURE init_waves
     waveAddress(2) = VARBANKPTR(wave3) : wavBank(2) = VARBANK(wave3)
     waveAddress(3) = VARBANKPTR(wave4) : wavBank(3) = VARBANK(wave4)
     waveAddress(4) = VARBANKPTR(wave5) : wavBank(4) = VARBANK(wave5)
+END PROC
+
+
+' =============================================================================
+' INIT_STUTTER
+' Populates the stutterReps lookup table.
+' Must be called once at startup, before any call to play_note_stutter.
+' =============================================================================
+PROCEDURE init_stutter
+    stutterReps(0) = 1
+    stutterReps(1) = 2
+    stutterReps(2) = 4
+    stutterReps(3) = 8
 END PROC
