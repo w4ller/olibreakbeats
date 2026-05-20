@@ -87,8 +87,11 @@ END PROC
 '   1. Risolve sm e reps dalla lookup table stutterReps
 '   2. Calcola newDiv = chunkDiv * reps (chunk proporzionalmente piu piccolo)
 '   3. Risolve baseIdx (scala chunkIdx, oppure RND risolto una volta sola)
-'   4. Loop reps volte: suona baseIdx, poi moltiplica step per delta 8.8
-'      Per sm 0..3 delta=$0100 (x1.0) -> pitch invariato, zero overhead
+'   4. Loop reps volte: suona baseIdx, poi aggiorna step con formula safe:
+'        product = curHi*dHi*256 + curHi*dLo + curLo*dHi
+'      Evita overflow INTEGER 16-bit: max value 542 << 32767.
+'      Termine curLo*dLo/256 trascurato (errore max ~0.004 semitoni).
+'      Per sm 0..3: dHi=1,dLo=0 -> product = curHi*256 -> pitch invariato.
 ' Richiede init_stutter chiamato una volta a startup.
 ' =============================================================================
 PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
@@ -100,6 +103,8 @@ PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, 
     DIM curHi   AS BYTE
     DIM curLo   AS BYTE
     DIM product AS INTEGER
+    DIM dHi     AS BYTE
+    DIM dLo     AS BYTE
 
     IF stutterMode = $FF THEN
         sm = RND(12)  :' 0..11
@@ -122,13 +127,15 @@ PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, 
 
         curHi = stepHi
         curLo = stepLo
+        dHi   = stutterDeltaHi(sm)
+        dLo   = stutterDeltaLo(sm)
 
         FOR r = 0 TO reps - 1
             play_note[baseIdx, newDiv, curHi, curLo, waveId]
-            ' moltiplica step 8.8 per delta 8.8: (cur * delta) >> 8
-            ' per sm 0..3 delta=$0100 -> product/256 = cur, pitch invariato
-            product = (curHi * 256 + curLo) * (stutterDeltaHi(sm) * 256 + stutterDeltaLo(sm))
-            product = product / 256
+            ' Moltiplicazione 8.8 safe: (a*256+b)*(c*256+d)/256
+            ' = a*c*256 + a*d + b*c  (b*d/256 trascurato, errore max ~0.004 semitoni)
+            ' Max con i nostri delta: 542 << 32767, nessun overflow INTEGER 16-bit
+            product = (curHi * dHi * 256) + (curHi * dLo) + (curLo * dHi)
             curHi = product / 256
             curLo = product AND $FF
         NEXT r
