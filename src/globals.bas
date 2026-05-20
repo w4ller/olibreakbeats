@@ -6,15 +6,30 @@
 '   byte 0          : N = number of patterns (1..255)
 '   byte 1..N*3     : for each pattern: WORD big-endian absolute offset + BYTE row_count
 '   row data        : [div, idx, stepHi, stepLo, waveId, stutterMode, 0, 0] x row_count
-'                     idx=$FF        = random chunk chosen at runtime
-'                     waveId=$FF     = random wave chosen at runtime (0..4)
-'                     waveId=0       = default (backward compatible with old patterns)
+'                     idx=$FF         = random chunk chosen at runtime
+'                     waveId=$FF      = random wave chosen at runtime (0..4)
+'                     waveId=0        = default (backward compatible with old patterns)
 '                     stutterMode=$00 = no stutter, 1x (default, backward compatible)
-'                     stutterMode=$01 = stutter 2x
-'                     stutterMode=$02 = stutter 4x
-'                     stutterMode=$03 = stutter 8x
-'                     stutterMode=$FF = random stutter chosen at runtime (1x/2x/4x)
+'                     stutterMode=$01 = stutter x2, flat pitch
+'                     stutterMode=$02 = stutter x4, flat pitch
+'                     stutterMode=$03 = stutter x8, flat pitch
+'                     stutterMode=$04 = stutter x2, pitch up +1 semi/rep
+'                     stutterMode=$05 = stutter x4, pitch up +1 semi/rep
+'                     stutterMode=$06 = stutter x2, pitch up +2 semi/rep
+'                     stutterMode=$07 = stutter x4, pitch up +2 semi/rep
+'                     stutterMode=$08 = stutter x2, pitch down -1 semi/rep
+'                     stutterMode=$09 = stutter x4, pitch down -1 semi/rep
+'                     stutterMode=$0A = stutter x2, pitch down -2 semi/rep
+'                     stutterMode=$0B = stutter x4, pitch down -2 semi/rep
+'                     stutterMode=$FF = random stutter chosen at runtime (sm 0..11)
 '                     byte 6..7 reserved for future use
+'
+' stepDelta 8.8 values used by stutterDeltaHi/Lo:
+'   semi  0 -> $0100 (x1.000000)
+'   semi +1 -> $010F (x1.058594, exact 2^(1/12)=1.059463)
+'   semi +2 -> $011F (x1.121094, exact 2^(2/12)=1.122462)
+'   semi -1 -> $00F2 (x0.945312, exact 2^(-1/12)=0.943874)
+'   semi -2 -> $00E4 (x0.890625, exact 2^(-2/12)=0.890899)
 ' =============================================================================
 
 ' --- Banked assets ---
@@ -54,9 +69,11 @@ DIM gNRows     AS BYTE     : GLOBAL gNRows       :' number of rows in current pa
 ' --- Single row buffer (8 bytes), read one row at a time during play_pattern ---
 DIM gRow (8) AS BYTE FOR BANK READ : GLOBAL gRow
 
-' --- Stutter reps lookup table (init by init_stutter) ---
-' Index = stutterMode (0..3): 0->1x, 1->2x, 2->4x, 3->8x
-DIM stutterReps (4) AS BYTE : GLOBAL stutterReps
+' --- Stutter lookup tables (init by init_stutter) ---
+' sm 0..11, $FF = RND
+DIM stutterReps    (12) AS BYTE : GLOBAL stutterReps     :' repetitions per mode
+DIM stutterDeltaHi (12) AS BYTE : GLOBAL stutterDeltaHi  :' 8.8 pitch delta, hi byte
+DIM stutterDeltaLo (12) AS BYTE : GLOBAL stutterDeltaLo  :' 8.8 pitch delta, lo byte
 
 
 ' =============================================================================
@@ -75,12 +92,33 @@ END PROC
 
 ' =============================================================================
 ' INIT_STUTTER
-' Populates the stutterReps lookup table.
+' Populates stutterReps and stutterDelta lookup tables.
 ' Must be called once at startup, before any call to play_note_stutter.
+'
+' sm  reps  delta     effect
+'  0    1   $0100     normal (no stutter)
+'  1    2   $0100     stutter x2, flat
+'  2    4   $0100     stutter x4, flat
+'  3    8   $0100     stutter x8, flat
+'  4    2   $010F     x2 pitch up +1 semi/rep
+'  5    4   $010F     x4 pitch up +1 semi/rep
+'  6    2   $011F     x2 pitch up +2 semi/rep
+'  7    4   $011F     x4 pitch up +2 semi/rep
+'  8    2   $00F2     x2 pitch down -1 semi/rep
+'  9    4   $00F2     x4 pitch down -1 semi/rep
+' 10    2   $00E4     x2 pitch down -2 semi/rep
+' 11    4   $00E4     x4 pitch down -2 semi/rep
 ' =============================================================================
 PROCEDURE init_stutter
-    stutterReps(0) = 1
-    stutterReps(1) = 2
-    stutterReps(2) = 4
-    stutterReps(3) = 8
+    stutterReps(0)=1  : stutterReps(1)=2  : stutterReps(2)=4  : stutterReps(3)=8
+    stutterReps(4)=2  : stutterReps(5)=4  : stutterReps(6)=2  : stutterReps(7)=4
+    stutterReps(8)=2  : stutterReps(9)=4  : stutterReps(10)=2 : stutterReps(11)=4
+
+    stutterDeltaHi(0)=1  : stutterDeltaHi(1)=1  : stutterDeltaHi(2)=1  : stutterDeltaHi(3)=1
+    stutterDeltaHi(4)=1  : stutterDeltaHi(5)=1  : stutterDeltaHi(6)=1  : stutterDeltaHi(7)=1
+    stutterDeltaHi(8)=0  : stutterDeltaHi(9)=0  : stutterDeltaHi(10)=0 : stutterDeltaHi(11)=0
+
+    stutterDeltaLo(0)=0    : stutterDeltaLo(1)=0    : stutterDeltaLo(2)=0    : stutterDeltaLo(3)=0
+    stutterDeltaLo(4)=$0F  : stutterDeltaLo(5)=$0F  : stutterDeltaLo(6)=$1F  : stutterDeltaLo(7)=$1F
+    stutterDeltaLo(8)=$F2  : stutterDeltaLo(9)=$F2  : stutterDeltaLo(10)=$E4 : stutterDeltaLo(11)=$E4
 END PROC

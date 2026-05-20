@@ -78,18 +78,17 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE_STUTTER  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode]
-' Ripete lo stesso micro-chunk N volte (loop stutter proporzionale).
+' Loop stutter proporzionale con pitch delta opzionale per ripetizione.
 '
-' stutterMode:
-'   $00 = 1x  (nessuno stutter, comportamento normale)
-'   $01 = 2x  (ripeti 2 volte, newDiv = chunkDiv*2)
-'   $02 = 4x  (ripeti 4 volte, newDiv = chunkDiv*4)
-'   $03 = 8x  (ripeti 8 volte, newDiv = chunkDiv*8)
-'   $FF = RND: sceglie casualmente tra sm=0,1,2 a runtime
+' stutterMode 0..11: vedi tabella in init_stutter (globals.bas)
+' stutterMode $FF  : RND tra sm 0..11 a runtime
 '
-' Il chunk viene suddiviso proporzionalmente: newDiv = chunkDiv * reps.
-' baseIdx viene scalato di conseguenza, cosi la porzione audio e identica.
-' idx=$FF viene risolto una volta sola prima del loop (stutter coerente).
+' Algoritmo:
+'   1. Risolve sm e reps dalla lookup table stutterReps
+'   2. Calcola newDiv = chunkDiv * reps (chunk proporzionalmente piu piccolo)
+'   3. Risolve baseIdx (scala chunkIdx, oppure RND risolto una volta sola)
+'   4. Loop reps volte: suona baseIdx, poi moltiplica step per delta 8.8
+'      Per sm 0..3 delta=$0100 (x1.0) -> pitch invariato, zero overhead
 ' Richiede init_stutter chiamato una volta a startup.
 ' =============================================================================
 PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
@@ -98,14 +97,17 @@ PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, 
     DIM newDiv  AS BYTE
     DIM baseIdx AS BYTE
     DIM reps    AS BYTE
+    DIM curHi   AS BYTE
+    DIM curLo   AS BYTE
+    DIM product AS INTEGER
 
     IF stutterMode = $FF THEN
-        sm = RND(3)   :' 0=1x, 1=2x, 2=4x
+        sm = RND(12)  :' 0..11
     ELSE
         sm = stutterMode
     ENDIF
 
-    reps = stutterReps(sm)  :' O(1) lookup, no IF chain
+    reps = stutterReps(sm)  :' O(1) lookup
 
     IF reps = 1 THEN
         play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
@@ -113,13 +115,22 @@ PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, 
         newDiv = chunkDiv * reps
 
         IF chunkIdx = $FF THEN
-            baseIdx = RND(chunkDiv) * reps  :' risolvi RND su div originale, poi scala
+            baseIdx = RND(chunkDiv) * reps  :' RND risolto una volta sola
         ELSE
             baseIdx = chunkIdx * reps
         ENDIF
 
+        curHi = stepHi
+        curLo = stepLo
+
         FOR r = 0 TO reps - 1
-            play_note[baseIdx, newDiv, stepHi, stepLo, waveId]
+            play_note[baseIdx, newDiv, curHi, curLo, waveId]
+            ' moltiplica step 8.8 per delta 8.8: (cur * delta) >> 8
+            ' per sm 0..3 delta=$0100 -> product/256 = cur, pitch invariato
+            product = (curHi * 256 + curLo) * (stutterDeltaHi(sm) * 256 + stutterDeltaLo(sm))
+            product = product / 256
+            curHi = product / 256
+            curLo = product AND $FF
         NEXT r
     ENDIF
 
