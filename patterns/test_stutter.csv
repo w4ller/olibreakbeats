@@ -1,0 +1,23 @@
+# test_stutter.csv — demo stutter effect
+# Colonna stutter: 0=1x  1=2x  2=4x  3=8x  255=RND
+#
+# pattern 1: stutter fisso x2 su ogni nota (amen, div=8, chunk casuale)
+# pattern 2: stutter fisso x4 su un singolo chunk (snare-like, div=4)
+# pattern 3: stutter random — ogni nota sceglie 1x/2x/4x a runtime
+#
+pattern,div,idx,semi,wave,stutter
+# --- pattern 1: stutter x2, chunk random, amen150 ---
+1,8,255,0,0,1
+1,8,255,0,0,1
+1,8,255,0,0,1
+1,8,255,+2,0,1
+# --- pattern 2: stutter x4, chunk fisso 0, wave 606 ---
+2,4,0,0,4,2
+2,4,1,0,4,2
+2,4,0,0,4,2
+2,4,2,0,4,2
+# --- pattern 3: stutter random, wave random ---
+3,8,255,0,255,255
+3,8,255,0,255,255
+3,8,255,+5,255,255
+3,8,255,0,255,255

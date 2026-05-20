@@ -40,15 +40,20 @@ END PROC
 ' =============================================================================
 ' PLAY_PATTERN
 ' Plays the current pattern row by row, reading directly from the BANK.
-' For each row: reads 8 bytes into gRow, passes all 5 fields to play_note.
-' Row format: [div, idx, stepHi, stepLo, waveId, 0, 0, 0]
-'   waveId=0..$04 = fixed wave; $FF = random wave
-' Bytes gRow(5..7) are reserved and ignored.
+' For each row: reads 8 bytes into gRow, passes all 6 fields to play_note_stutter.
+' Row format: [div, idx, stepHi, stepLo, waveId, stutterMode, 0, 0]
+'   waveId=0..$04      = fixed wave; $FF = random wave
+'   stutterMode=$00    = no stutter (1x, default)
+'   stutterMode=$01    = stutter 2x
+'   stutterMode=$02    = stutter 4x
+'   stutterMode=$03    = stutter 8x
+'   stutterMode=$FF    = random stutter (1x/2x/4x)
+' Byte gRow(6..7) are reserved and ignored.
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i AS BYTE
     FOR i = 0 TO gNRows - 1
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
-        play_note[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4)]
+        play_note_stutter[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5)]
     NEXT i
 END PROC

@@ -74,3 +74,84 @@ PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo A
     gStepLo(0)    = stepLo
     CALL play_chunk_asm
 END PROC
+
+
+' =============================================================================
+' PLAY_NOTE_STUTTER  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode]
+' Loop stutter proporzionale con pitch delta opzionale per ripetizione.
+'
+' Valori stutterMode:
+'   0..11 : modalita diretta (vedi tabella init_stutter in globals.bas)
+'   $FB   : RND flat         -> sm 0..3  (nessun pitch change)
+'   $FC   : RND pitch up+dn  -> sm 4..11 (up o down, no flat)
+'   $FD   : RND pitch down   -> sm 8..11
+'   $FE   : RND pitch up     -> sm 4..7
+'   $FF   : RND totale       -> sm 0..11
+'
+' Algoritmo:
+'   1. Risolve sm dal valore speciale o lo usa direttamente
+'   2. Legge reps da stutterReps(sm)
+'   3. Calcola newDiv = chunkDiv * reps
+'   4. Risolve baseIdx (scala chunkIdx, RND risolto una volta sola)
+'   5. Loop reps volte: suona baseIdx, aggiorna step con formula 8.8 safe:
+'        product = curHi*dHi*256 + curHi*dLo + curLo*dHi
+'      Max value 542 << 32767, nessun overflow INTEGER 16-bit.
+'      Per sm 0..3: dHi=1,dLo=0 -> pitch invariato.
+' Richiede init_stutter chiamato una volta a startup.
+' =============================================================================
+PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
+    DIM sm      AS BYTE
+    DIM r       AS BYTE
+    DIM newDiv  AS BYTE
+    DIM baseIdx AS BYTE
+    DIM reps    AS BYTE
+    DIM curHi   AS BYTE
+    DIM curLo   AS BYTE
+    DIM product AS INTEGER
+    DIM dHi     AS BYTE
+    DIM dLo     AS BYTE
+
+    IF stutterMode = $FF THEN
+        sm = RND(12)       :' 0..11 tutti i modi
+    ELSE IF stutterMode = $FE THEN
+        sm = 4 + RND(4)    :' 4..7  pitch up
+    ELSE IF stutterMode = $FD THEN
+        sm = 8 + RND(4)    :' 8..11 pitch down
+    ELSE IF stutterMode = $FC THEN
+        sm = 4 + RND(8)    :' 4..11 pitch up o down, no flat
+    ELSE IF stutterMode = $FB THEN
+        sm = RND(4)        :' 0..3  flat, no pitch change
+    ELSE
+        sm = stutterMode
+    ENDIF
+
+    reps = stutterReps(sm)  :' O(1) lookup
+
+    IF reps = 1 THEN
+        play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
+    ELSE
+        newDiv = chunkDiv * reps
+
+        IF chunkIdx = $FF THEN
+            baseIdx = RND(chunkDiv) * reps  :' RND risolto una volta sola
+        ELSE
+            baseIdx = chunkIdx * reps
+        ENDIF
+
+        curHi = stepHi
+        curLo = stepLo
+        dHi   = stutterDeltaHi(sm)
+        dLo   = stutterDeltaLo(sm)
+
+        FOR r = 0 TO reps - 1
+            play_note[baseIdx, newDiv, curHi, curLo, waveId]
+            ' Moltiplicazione 8.8 safe: (a*256+b)*(c*256+d)/256
+            ' = a*c*256 + a*d + b*c  (b*d/256 trascurato, errore max ~0.004 semitoni)
+            ' Max con i nostri delta: 542 << 32767, nessun overflow INTEGER 16-bit
+            product = (curHi * dHi * 256) + (curHi * dLo) + (curLo * dHi)
+            curHi = product / 256
+            curLo = product AND $FF
+        NEXT r
+    ENDIF
+
+END PROC
