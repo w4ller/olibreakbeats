@@ -16,7 +16,7 @@ Formato CSV (con header obbligatorio, righe # = commenti):
   semi    : -24 .. +24
   wave    : 0..4 (seleziona wave fisso) oppure 255 (= RND: wave casuale a runtime)
             colonna opzionale: default 0 (backward compatible con CSV senza wave)
-  stutter : modalità stutter (colonna opzionale, default 0):
+  stutter : modalita stutter (colonna opzionale, default 0):
              0  = no stutter (1x, pitch invariato)
              1  = 2x, pitch invariato
              2  = 4x, pitch invariato
@@ -29,7 +29,11 @@ Formato CSV (con header obbligatorio, righe # = commenti):
              9  = 4x, pitch down -1 semitono/rep
             10  = 2x, pitch down -2 semitoni/rep
             11  = 4x, pitch down -2 semitoni/rep
-           255  = RND: sceglie casualmente tra sm 0..11 a runtime
+           251  = RND flat       (sm 0..3,  no pitch change)
+           252  = RND pitch up+dn (sm 4..11, up o down, no flat)
+           253  = RND pitch down  (sm 8..11)
+           254  = RND pitch up    (sm 4..7)
+           255  = RND totale      (sm 0..11)
 
 Formato binario output (patterns.bin):
   byte  0         : N = numero di pattern nel file (1..255)
@@ -65,10 +69,9 @@ import csv, math, os, sys, argparse, struct
 VALID_DIVS      = {1, 2, 4, 8, 16, 32, 64}
 IDX_RANDOM      = 255        # valore speciale: chunk casuale a runtime
 WAVE_RANDOM     = 255        # valore speciale: wave casuale a runtime
-STUTTER_RANDOM  = 255        # valore speciale: stutter casuale a runtime
 
-# sm 0..11 + 255=RND
-VALID_STUTTERS  = set(range(12)) | {STUTTER_RANDOM}
+# Valori stutter validi: 0..11 diretti + $FB..$FF speciali
+VALID_STUTTERS  = set(range(12)) | {251, 252, 253, 254, 255}
 
 STUTTER_LABEL   = {
     0:  '1x',
@@ -83,14 +86,18 @@ STUTTER_LABEL   = {
     9:  '4x-1semi↓',
     10: '2x-2semi↓',
     11: '4x-2semi↓',
-    STUTTER_RANDOM: 'RND',
+    251: 'RND-flat',
+    252: 'RND-pitch↕',
+    253: 'RND-pitch↓',
+    254: 'RND-pitch↑',
+    255: 'RND-all',
 }
 
 STUTTER_HELP = (
     "0=1x  1=2x  2=4x  3=8x  "
     "4=2x+1semi↑  5=4x+1semi↑  6=2x+2semi↑  7=4x+2semi↑  "
     "8=2x-1semi↓  9=4x-1semi↓  10=2x-2semi↓  11=4x-2semi↓  "
-    "255=RND"
+    "251=RND-flat  252=RND-pitch↕  253=RND-pitch↓  254=RND-pitch↑  255=RND-all"
 )
 
 N_WAVES         = 5          # wave0..wave4
@@ -151,13 +158,12 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
                 continue
 
             shi, slo = semi_to_step88(semi)
-            idx_str  = "RND" if idx     == IDX_RANDOM     else str(idx)
-            wav_str  = "RND" if wave    == WAVE_RANDOM     else str(wave)
+            idx_str  = "RND" if idx     == IDX_RANDOM  else str(idx)
+            wav_str  = "RND" if wave    == WAVE_RANDOM  else str(wave)
             stt_str  = STUTTER_LABEL[stutter]
             if verbose:
                 print(f"  pat={pat_id} div={div:2d} idx={idx_str:>3} semi={semi:+3d} "
                       f"-> ${shi:02X}${slo:02X} ({2**(semi/12):.4f}x)  wave={wav_str}  stutter={stt_str}")
-            # 6 byte dati + 2 byte riservati
             patterns.setdefault(pat_id, []).append(bytes([div, idx, shi, slo, wave, stutter, 0, 0]))
 
     if errors:
@@ -170,15 +176,6 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
 
 
 def build_binary(patterns: dict) -> bytes:
-    """
-    Assembla header + dati in un unico blob binario.
-
-      byte 0          : N (numero pattern)
-      byte 1..N*3     : N x [WORD big-endian offset assoluto, BYTE row_count]
-      poi dati pattern consecutivi, nessun terminatore
-
-    Verifica che il risultato stia nel BANK hardware (max 16 KB).
-    """
     pat_list    = list(patterns.values())
     n           = len(pat_list)
     header_size = 1 + n * 3
@@ -211,7 +208,6 @@ def build_binary(patterns: dict) -> bytes:
 
 
 def dump_binary(blob: bytes):
-    """Stampa una decodifica leggibile del file binario."""
     n = blob[0]
     header_size = 1 + n * 3
     print(f"\n  Header: {n} pattern, {header_size} byte")
@@ -236,8 +232,8 @@ def dump_binary(blob: bytes):
             )
             raw      = shi * 256 + slo
             semi     = round(12 * math.log2(raw / 256)) if raw > 0 else 0
-            idx_str  = "RND" if idx     == IDX_RANDOM    else str(idx)
-            wave_str = "RND" if wave_id == WAVE_RANDOM    else str(wave_id)
+            idx_str  = "RND" if idx     == IDX_RANDOM   else str(idx)
+            wave_str = "RND" if wave_id == WAVE_RANDOM   else str(wave_id)
             stt_str  = STUTTER_LABEL.get(stutter, f"?{stutter}")
             print(f"       div={d:2d}  idx={idx_str:>3}  step=${shi:02X}${slo:02X}  semi={semi:+d}  wave={wave_str}  stutter={stt_str}")
 

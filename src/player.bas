@@ -80,18 +80,23 @@ END PROC
 ' PLAY_NOTE_STUTTER  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode]
 ' Loop stutter proporzionale con pitch delta opzionale per ripetizione.
 '
-' stutterMode 0..11: vedi tabella in init_stutter (globals.bas)
-' stutterMode $FF  : RND tra sm 0..11 a runtime
+' Valori stutterMode:
+'   0..11 : modalita diretta (vedi tabella init_stutter in globals.bas)
+'   $FB   : RND flat         -> sm 0..3  (nessun pitch change)
+'   $FC   : RND pitch up+dn  -> sm 4..11 (up o down, no flat)
+'   $FD   : RND pitch down   -> sm 8..11
+'   $FE   : RND pitch up     -> sm 4..7
+'   $FF   : RND totale       -> sm 0..11
 '
 ' Algoritmo:
-'   1. Risolve sm e reps dalla lookup table stutterReps
-'   2. Calcola newDiv = chunkDiv * reps (chunk proporzionalmente piu piccolo)
-'   3. Risolve baseIdx (scala chunkIdx, oppure RND risolto una volta sola)
-'   4. Loop reps volte: suona baseIdx, poi aggiorna step con formula safe:
+'   1. Risolve sm dal valore speciale o lo usa direttamente
+'   2. Legge reps da stutterReps(sm)
+'   3. Calcola newDiv = chunkDiv * reps
+'   4. Risolve baseIdx (scala chunkIdx, RND risolto una volta sola)
+'   5. Loop reps volte: suona baseIdx, aggiorna step con formula 8.8 safe:
 '        product = curHi*dHi*256 + curHi*dLo + curLo*dHi
-'      Evita overflow INTEGER 16-bit: max value 542 << 32767.
-'      Termine curLo*dLo/256 trascurato (errore max ~0.004 semitoni).
-'      Per sm 0..3: dHi=1,dLo=0 -> product = curHi*256 -> pitch invariato.
+'      Max value 542 << 32767, nessun overflow INTEGER 16-bit.
+'      Per sm 0..3: dHi=1,dLo=0 -> pitch invariato.
 ' Richiede init_stutter chiamato una volta a startup.
 ' =============================================================================
 PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
@@ -107,7 +112,15 @@ PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, 
     DIM dLo     AS BYTE
 
     IF stutterMode = $FF THEN
-        sm = RND(12)  :' 0..11
+        sm = RND(12)       :' 0..11 tutti i modi
+    ELSE IF stutterMode = $FE THEN
+        sm = 4 + RND(4)    :' 4..7  pitch up
+    ELSE IF stutterMode = $FD THEN
+        sm = 8 + RND(4)    :' 8..11 pitch down
+    ELSE IF stutterMode = $FC THEN
+        sm = 4 + RND(8)    :' 4..11 pitch up o down, no flat
+    ELSE IF stutterMode = $FB THEN
+        sm = RND(4)        :' 0..3  flat, no pitch change
     ELSE
         sm = stutterMode
     ENDIF
