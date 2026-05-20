@@ -16,8 +16,20 @@ Formato CSV (con header obbligatorio, righe # = commenti):
   semi    : -24 .. +24
   wave    : 0..4 (seleziona wave fisso) oppure 255 (= RND: wave casuale a runtime)
             colonna opzionale: default 0 (backward compatible con CSV senza wave)
-  stutter : 0=no stutter (1x)  1=2x  2=4x  3=8x  255=RND(1x/2x/4x)
-            colonna opzionale: default 0 (backward compatible con CSV senza stutter)
+  stutter : modalità stutter (colonna opzionale, default 0):
+             0  = no stutter (1x, pitch invariato)
+             1  = 2x, pitch invariato
+             2  = 4x, pitch invariato
+             3  = 8x, pitch invariato
+             4  = 2x, pitch up   +1 semitono/rep
+             5  = 4x, pitch up   +1 semitono/rep
+             6  = 2x, pitch up   +2 semitoni/rep
+             7  = 4x, pitch up   +2 semitoni/rep
+             8  = 2x, pitch down -1 semitono/rep
+             9  = 4x, pitch down -1 semitono/rep
+            10  = 2x, pitch down -2 semitoni/rep
+            11  = 4x, pitch down -2 semitoni/rep
+           255  = RND: sceglie casualmente tra sm 0..11 a runtime
 
 Formato binario output (patterns.bin):
   byte  0         : N = numero di pattern nel file (1..255)
@@ -34,7 +46,7 @@ Formato binario output (patterns.bin):
   WAVE_ID     = 255 ($FF) = wave casuale scelto a runtime tra 0..4.
   WAVE_ID     = 0         = default (backward compatible con vecchi pattern).
   STUTTER     = 0         = nessuno stutter (backward compatible).
-  STUTTER     = 255 ($FF) = stutter casuale scelto a runtime (1x/2x/4x).
+  STUTTER     = 255 ($FF) = stutter casuale scelto a runtime (sm 0..11).
 
   Offset e' assoluto dall'inizio del file.
   Header size = 1 + N*3 byte.
@@ -54,8 +66,33 @@ VALID_DIVS      = {1, 2, 4, 8, 16, 32, 64}
 IDX_RANDOM      = 255        # valore speciale: chunk casuale a runtime
 WAVE_RANDOM     = 255        # valore speciale: wave casuale a runtime
 STUTTER_RANDOM  = 255        # valore speciale: stutter casuale a runtime
-VALID_STUTTERS  = {0, 1, 2, 3, STUTTER_RANDOM}  # 0=1x 1=2x 2=4x 3=8x 255=RND
-STUTTER_LABEL   = {0: '1x', 1: '2x', 2: '4x', 3: '8x', STUTTER_RANDOM: 'RND'}
+
+# sm 0..11 + 255=RND
+VALID_STUTTERS  = set(range(12)) | {STUTTER_RANDOM}
+
+STUTTER_LABEL   = {
+    0:  '1x',
+    1:  '2x',
+    2:  '4x',
+    3:  '8x',
+    4:  '2x+1semi↑',
+    5:  '4x+1semi↑',
+    6:  '2x+2semi↑',
+    7:  '4x+2semi↑',
+    8:  '2x-1semi↓',
+    9:  '4x-1semi↓',
+    10: '2x-2semi↓',
+    11: '4x-2semi↓',
+    STUTTER_RANDOM: 'RND',
+}
+
+STUTTER_HELP = (
+    "0=1x  1=2x  2=4x  3=8x  "
+    "4=2x+1semi↑  5=4x+1semi↑  6=2x+2semi↑  7=4x+2semi↑  "
+    "8=2x-1semi↓  9=4x-1semi↓  10=2x-2semi↓  11=4x-2semi↓  "
+    "255=RND"
+)
+
 N_WAVES         = 5          # wave0..wave4
 ROW_BYTES       = 8          # byte per riga: 6 dati + 2 riservati
 MAX_BANK        = 16 * 1024  # 16384 byte — limite BANK hardware
@@ -107,7 +144,10 @@ def compile_csv(csv_path: str, verbose: bool = False) -> dict:
                 errors.append(f"  riga {lineno}: wave={wave} fuori range 0..{N_WAVES-1} (o 255=RND)")
                 continue
             if stutter not in VALID_STUTTERS:
-                errors.append(f"  riga {lineno}: stutter={stutter} non valido, valori: 0=1x 1=2x 2=4x 3=8x 255=RND")
+                errors.append(
+                    f"  riga {lineno}: stutter={stutter} non valido\n"
+                    f"    valori: {STUTTER_HELP}"
+                )
                 continue
 
             shi, slo = semi_to_step88(semi)
