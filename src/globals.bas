@@ -21,7 +21,7 @@
 GLOBAL wave
 wave  := LOAD("assets/amen150.bin") BANKED
 GLOBAL wave2
-wave2 := LOAD("assets/upscale.bin") BANKED
+wave2 := LOAD("assets/chords.bin") BANKED
 GLOBAL wave3
 wave3 := LOAD("assets/reverse.bin") BANKED
 GLOBAL wave4

@@ -91,12 +91,14 @@ END PROC
 ' Per mantenere il ritmo usare div proporzionalmente piu alto.
 ' =============================================================================
 PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
-    DIM reps AS BYTE
-    DIM sm   AS BYTE
-    DIM r    AS BYTE
+    DIM reps    AS BYTE
+    DIM sm      AS BYTE
+    DIM r       AS BYTE
+    DIM newDiv  AS BYTE
+    DIM baseIdx AS BYTE
 
     IF stutterMode = $FF THEN
-        sm = RND(3)   :' 0=1x, 1=2x, 2=4x (random tra i tre modi base)
+        sm = RND(3)   :' 0=1x, 1=2x, 2=4x
     ELSE
         sm = stutterMode
     ENDIF
@@ -111,7 +113,20 @@ PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, 
         reps = 8
     ENDIF
 
-    FOR r = 1 TO reps
+    IF reps = 1 THEN
         play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
-    NEXT r
+    ELSE
+        newDiv  = chunkDiv * reps
+
+        IF chunkIdx = $FF THEN
+            baseIdx = RND(chunkDiv) * reps  :' risolvi RND su div originale, poi scala
+        ELSE
+            baseIdx = chunkIdx * reps
+        ENDIF
+
+        FOR r = 0 TO reps - 1
+            play_note[baseIdx, newDiv, stepHi, stepLo, waveId]
+        NEXT r
+    ENDIF
+
 END PROC
