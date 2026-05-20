@@ -40,20 +40,35 @@ END PROC
 ' =============================================================================
 ' PLAY_PATTERN
 ' Plays the current pattern row by row, reading directly from the BANK.
-' For each row: reads 8 bytes into gRow, passes all 6 fields to play_note_stutter.
-' Row format: [div, idx, stepHi, stepLo, waveId, stutterMode, 0, 0]
-'   waveId=0..$04      = fixed wave; $FF = random wave
-'   stutterMode=$00    = no stutter (1x, default)
-'   stutterMode=$01    = stutter 2x
-'   stutterMode=$02    = stutter 4x
-'   stutterMode=$03    = stutter 8x
-'   stutterMode=$FF    = random stutter (1x/2x/4x)
-' Byte gRow(6..7) are reserved and ignored.
+' Row format: [div, idx, stepHi, stepLo, waveId, stutterMode, reverseMode, prob]
+'   div         = chunk divisor (1 2 4 8 16 32 64)
+'   idx         = chunk index (0..div-1) or $FF = random
+'   stepHi/Lo   = 8.8 fixed-point pitch multiplier
+'   waveId      = 0..4 fixed wave; $FF = random wave
+'   stutterMode = $00 no stutter; $01..$0B modes; $FB..$FF RND sub-range
+'   reverseMode = $00 forward; $01 reverse; $FF RND fwd/rev
+'   prob        = probabilita esecuzione: 0=mai 1=~0.4% 13=~5%
+'                 64=~25% 128=~50% 255=sempre (default)
+'
+' Logica probabilita:
+'   prob=255 -> esegui sempre (fast path, nessuna chiamata RND)
+'   prob=0   -> salta sempre
+'   altri    -> esegui se RND(256) <= prob
+'   RND(256) restituisce 0..255; prob=128 -> ~50.4% di esecuzione.
 ' =============================================================================
 PROCEDURE play_pattern
-    DIM i AS BYTE
+    DIM i    AS BYTE
+    DIM prob AS BYTE
     FOR i = 0 TO gNRows - 1
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
-        play_note_stutter[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5)]
+        prob = gRow(7)
+        IF prob = 255 THEN
+            play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
+        ELSE IF prob > 0 THEN
+            IF RND(256) <= prob THEN
+                play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
+            ENDIF
+        ENDIF
+        ' prob=0: salta sempre, nessuna azione
     NEXT i
 END PROC
