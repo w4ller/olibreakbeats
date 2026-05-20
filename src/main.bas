@@ -11,6 +11,7 @@ INCLUDE "src/patterns.bas"
 
 CALL init_dac
 CALL init_waves
+CALL init_stutter
 
 ' Read total pattern count from byte 0 of patterns.bin
 CALL init_patterns
