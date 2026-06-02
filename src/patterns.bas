@@ -55,6 +55,9 @@ END PROC
 '   prob=0   -> salta sempre
 '   altri    -> esegui se RND(256) <= prob
 '   RND(256) restituisce 0..255; prob=128 -> ~50.4% di esecuzione.
+'
+' Keyboard input is checked after each row via check_key + handle_key.
+' Pattern stops immediately if gModeStop is set.
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i    AS BYTE
@@ -69,6 +72,12 @@ PROCEDURE play_pattern
                 play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
             ENDIF
         ENDIF
-        ' prob=0: salta sempre, nessuna azione
+
+        CALL check_key
+        CALL handle_key
+        IF gModeStop = 1 THEN
+            EXIT FOR
+        ENDIF
+
     NEXT i
 END PROC

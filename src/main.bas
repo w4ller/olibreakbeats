@@ -3,6 +3,7 @@
 ' Startup: init + wait for key input to select playback mode.
 ' A = play all patterns, 1-9 = single pattern loop
 ' S = stop, N = next, P = previous
+' check_key + handle_key are called inside play_pattern after each row.
 ' =============================================================================
 
 INCLUDE "src/globals.bas"
@@ -21,9 +22,6 @@ gModeAll    = 0
 gModeStop   = 0
 
 DO
-    CALL check_key
-    CALL handle_key
-
     IF gModeStop = 0 THEN
         IF gModeAll = 1 THEN
             CALL load_pattern[gCurPattern]
@@ -37,5 +35,8 @@ DO
             CALL load_pattern[gCurPattern]
             CALL play_pattern
         ENDIF
+    ELSE
+        CALL check_key
+        CALL handle_key
     ENDIF
 LOOP
