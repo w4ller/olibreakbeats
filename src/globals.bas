@@ -75,6 +75,12 @@ DIM stutterReps    (12) AS BYTE : GLOBAL stutterReps     :' repetitions per mode
 DIM stutterDeltaHi (12) AS BYTE : GLOBAL stutterDeltaHi  :' 8.8 pitch delta, hi byte
 DIM stutterDeltaLo (12) AS BYTE : GLOBAL stutterDeltaLo  :' 8.8 pitch delta, lo byte
 
+' --- Pattern change flag ---
+' Set to 1 by handle_key when 1-9/N/P is pressed during playback.
+' Causes play_pattern to exit immediately after the current row.
+' Reset to 0 by main.bas at the start of each play cycle.
+DIM gPatChanged AS BYTE : GLOBAL gPatChanged
+
 
 ' =============================================================================
 ' INIT_WAVES

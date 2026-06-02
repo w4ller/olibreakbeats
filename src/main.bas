@@ -1,24 +1,48 @@
 ' =============================================================================
 ' olibreakbeats - main.bas
-' Startup: init_waves + init_patterns, then loops through all patterns
-' calling load_pattern + play_pattern for each one.
+' Startup: init + wait for key input to select playback mode.
+' A = play all patterns, 1-9 = single pattern loop
+' S = stop, N = next, P = previous
+' check_key + handle_key called inside play_pattern after each row.
+' gPatChanged=1 causes immediate exit from play_pattern (pattern switch).
+' gModeStop=1 causes stop; check_key/handle_key polled in idle state.
 ' =============================================================================
 
 INCLUDE "src/globals.bas"
 INCLUDE "src/dac.bas"
 INCLUDE "src/player.bas"
 INCLUDE "src/patterns.bas"
+INCLUDE "src/input.bas"
 
 CALL init_dac
 CALL init_waves
 CALL init_stutter
-
-' Read total pattern count from byte 0 of patterns.bin
 CALL init_patterns
 
+gCurPattern = 0
+gModeAll    = 0
+gModeStop   = 0
+gPatChanged = 0
+
 DO
-    FOR n = 0 TO gNPat(0) - 1
-        CALL load_pattern[n]
-        CALL play_pattern
-    NEXT
+    IF gModeStop = 0 THEN
+        gPatChanged = 0  :' reset prima di ogni ciclo di play
+        IF gModeAll = 1 THEN
+            CALL load_pattern[gCurPattern]
+            CALL play_pattern
+            IF gPatChanged = 0 THEN  :' avanza al pattern successivo solo se non c'e' stato cambio manuale
+                IF gCurPattern < gNPat(0) - 1 THEN
+                    gCurPattern = gCurPattern + 1
+                ELSE
+                    gCurPattern = 0
+                ENDIF
+            ENDIF
+        ELSE
+            CALL load_pattern[gCurPattern]
+            CALL play_pattern
+        ENDIF
+    ELSE
+        CALL check_key
+        CALL handle_key
+    ENDIF
 LOOP
