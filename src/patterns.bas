@@ -57,14 +57,17 @@ END PROC
 '   RND(256) restituisce 0..255; prob=128 -> ~50.4% di esecuzione.
 '
 ' Keyboard input is checked after each row via check_key + handle_key.
-' Pattern stops immediately if gModeStop is set.
+' Exits immediately if gModeStop=1 (tasto S) or gPatChanged=1 (1-9/N/P).
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i    AS BYTE
     DIM prob AS BYTE
-    FOR i = 0 TO gNRows - 1
+
+    i = 0
+    DO
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
         prob = gRow(7)
+
         IF prob = 255 THEN
             play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
         ELSE IF prob > 0 THEN
@@ -75,9 +78,7 @@ PROCEDURE play_pattern
 
         CALL check_key
         CALL handle_key
-        IF gModeStop = 1 THEN
-            EXIT FOR
-        ENDIF
 
-    NEXT i
+        i = i + 1
+    LOOP WHILE i < gNRows AND gModeStop = 0 AND gPatChanged = 0
 END PROC

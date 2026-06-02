@@ -10,7 +10,8 @@
 ' gKeyPressed : raw scan code (0 = no key)
 ' gCurPattern : 0..gNPat(0)-1, current pattern index
 ' gModeAll    : 1 = play all patterns in loop
-' gModeStop   : 1 = stop playback
+' gModeStop   : 1 = stop playback (tasto S)
+' gPatChanged : 1 = pattern changed mid-play (1-9/N/P), reset by main loop
 ' =============================================================================
 
 DIM gKeyPressed AS BYTE : GLOBAL gKeyPressed
@@ -42,7 +43,11 @@ END PROC
 ' =============================================================================
 ' HANDLE_KEY
 ' Call after check_key. Processes key only on press edge (not held).
-' Updates gCurPattern, gModeAll, gModeStop.
+' Updates gCurPattern, gModeAll, gModeStop, gPatChanged.
+'
+' S         -> gModeStop=1, gModeAll=0  (stop)
+' A         -> gModeAll=1, gModeStop=0  (play all)
+' N/P/1-9   -> gCurPattern updated, gPatChanged=1 (immediate switch)
 ' =============================================================================
 PROC handle_key
     IF gKeyPressed = 0 OR gKeyPressed = gLastKey THEN
@@ -54,12 +59,14 @@ PROC handle_key
 
     SELECT CASE gKeyPressed
         CASE $0E :' A - play all
-            gModeAll  = 1
-            gModeStop = 0
+            gModeAll    = 1
+            gModeStop   = 0
+            gPatChanged = 0
 
         CASE $16 :' S - stop
-            gModeStop = 1
-            gModeAll  = 0
+            gModeStop   = 1
+            gModeAll    = 0
+            gPatChanged = 0
 
         CASE $39 :' N - next pattern
             gModeAll  = 0
@@ -69,6 +76,7 @@ PROC handle_key
             ELSE
                 gCurPattern = 0
             ENDIF
+            gPatChanged = 1
 
         CASE $1D :' P - previous pattern
             gModeAll  = 0
@@ -78,15 +86,16 @@ PROC handle_key
             ELSE
                 gCurPattern = gNPat(0) - 1
             ENDIF
+            gPatChanged = 1
 
-        CASE $0A : gCurPattern = 0 : gModeAll = 0 : gModeStop = 0 :' 1
-        CASE $12 : gCurPattern = 1 : gModeAll = 0 : gModeStop = 0 :' 2
-        CASE $1A : gCurPattern = 2 : gModeAll = 0 : gModeStop = 0 :' 3
-        CASE $22 : gCurPattern = 3 : gModeAll = 0 : gModeStop = 0 :' 4
-        CASE $2A : gCurPattern = 4 : gModeAll = 0 : gModeStop = 0 :' 5
-        CASE $32 : gCurPattern = 5 : gModeAll = 0 : gModeStop = 0 :' 6
-        CASE $33 : gCurPattern = 6 : gModeAll = 0 : gModeStop = 0 :' 7
-        CASE $2B : gCurPattern = 7 : gModeAll = 0 : gModeStop = 0 :' 8
-        CASE $23 : gCurPattern = 8 : gModeAll = 0 : gModeStop = 0 :' 9
+        CASE $0A : gCurPattern = 0 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 1
+        CASE $12 : gCurPattern = 1 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 2
+        CASE $1A : gCurPattern = 2 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 3
+        CASE $22 : gCurPattern = 3 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 4
+        CASE $2A : gCurPattern = 4 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 5
+        CASE $32 : gCurPattern = 5 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 6
+        CASE $33 : gCurPattern = 6 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 7
+        CASE $2B : gCurPattern = 7 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 8
+        CASE $23 : gCurPattern = 8 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 9
     ENDSELECT
 END PROC
