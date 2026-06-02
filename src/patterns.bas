@@ -59,7 +59,7 @@ END PROC
 '   RND(256) restituisce 0..255; prob=128 -> ~50.4% di esecuzione.
 '
 ' Keyboard input is checked after each row via check_key + handle_key.
-' Exits immediately if gModeStop=1 (tasto S) or gPatChanged=1 (1-9/N/P).
+' Exits immediately if gModeStop=1 (tasto S o one-shot) or gPatChanged=1 (1-9/N/P).
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i    AS BYTE
