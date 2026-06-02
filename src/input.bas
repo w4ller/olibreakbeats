@@ -88,5 +88,5 @@ PROC handle_key
         CASE $33 : gCurPattern = 6 : gModeAll = 0 : gModeStop = 0 :' 7
         CASE $2B : gCurPattern = 7 : gModeAll = 0 : gModeStop = 0 :' 8
         CASE $23 : gCurPattern = 8 : gModeAll = 0 : gModeStop = 0 :' 9
-    END SELECT
+    ENDSELECT
 END PROC
