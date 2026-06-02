@@ -47,28 +47,43 @@ END PROC
 '   waveId      = 0..4 fixed wave; $FF = random wave
 '   stutterMode = $00 no stutter; $01..$0B modes; $FB..$FF RND sub-range
 '   reverseMode = $00 forward; $01 reverse; $FF RND fwd/rev
-'   prob        = probabilita esecuzione: 0=mai 1=~0.4% 13=~5%
-'                 64=~25% 128=~50% 255=sempre (default)
+'   prob        = probabilita esecuzione:
+'                 0   = ONE-SHOT: suona una volta poi gModeStop=1 (attendi input)
+'                 1..254 = probabilita ~0.4%..~99.6%
+'                 255 = suona sempre (fast path, nessuna chiamata RND)
 '
 ' Logica probabilita:
-'   prob=255 -> esegui sempre (fast path, nessuna chiamata RND)
-'   prob=0   -> salta sempre
+'   prob=255 -> esegui sempre
+'   prob=0   -> esegui una volta (one-shot) poi stop
 '   altri    -> esegui se RND(256) <= prob
 '   RND(256) restituisce 0..255; prob=128 -> ~50.4% di esecuzione.
+'
+' Keyboard input is checked after each row via check_key + handle_key.
+' Exits immediately if gModeStop=1 (tasto S) or gPatChanged=1 (1-9/N/P).
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i    AS BYTE
     DIM prob AS BYTE
-    FOR i = 0 TO gNRows - 1
+
+    i = 0
+    DO
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
         prob = gRow(7)
+
         IF prob = 255 THEN
             play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
-        ELSE IF prob > 0 THEN
+        ELSE IF prob = 0 THEN
+            play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)] :' one-shot
+            gModeStop = 1
+        ELSE
             IF RND(256) <= prob THEN
                 play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
             ENDIF
         ENDIF
-        ' prob=0: salta sempre, nessuna azione
-    NEXT i
+
+        CALL check_key
+        CALL handle_key
+
+        i = i + 1
+    LOOP WHILE i < gNRows AND gModeStop = 0 AND gPatChanged = 0
 END PROC
