@@ -3,6 +3,7 @@
 ' Startup: init + wait for key input to select playback mode.
 ' A = play all patterns, 1-9 = single pattern loop
 ' S = stop, N = next, P = previous
+' V = viewer grafico pattern (solo con motore fermo)
 ' check_key + handle_key called inside play_pattern after each row.
 ' gPatChanged=1 causes immediate exit from play_pattern (pattern switch).
 ' gModeStop=1 causes stop; check_key/handle_key polled in idle state.
@@ -13,6 +14,7 @@ INCLUDE "src/dac.bas"
 INCLUDE "src/player.bas"
 INCLUDE "src/patterns.bas"
 INCLUDE "src/input.bas"
+INCLUDE "src/viewer.bas"
 
 CALL init_dac
 CALL init_waves
@@ -23,6 +25,7 @@ gCurPattern = 0
 gModeAll    = 0
 gModeStop   = 0
 gPatChanged = 0
+gModeViewer = 0
 
 DO
     IF gModeStop = 0 THEN
@@ -42,6 +45,11 @@ DO
             CALL play_pattern
         ENDIF
     ELSE
+        IF gModeViewer = 1 THEN
+            gModeViewer = 0
+            CALL viewer_entry :' lancia viewer ASM; ritorna con RTS su tasto Q
+            CALL load_pattern[gCurPattern] :' ricarica il pattern eventualmente cambiato nel viewer
+        ENDIF
         CALL check_key
         CALL handle_key
     ENDIF
