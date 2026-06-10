@@ -15,9 +15,12 @@
 ' Variabili globali ugBASIC accessibili via prefisso _ in ASM:
 '   _gCurPattern  : byte, pattern corrente
 '   _gNPat        : byte, numero di pattern totali (primo byte array)
-'   _gPatOffset   : word big-endian, offset riga 0 nel banco patFile
+'   _gPatOffset   : INTEGER big-endian, offset riga 0 nel banco patFile
 '   _gNRows       : byte, numero righe del pattern corrente
 '   _patFile      : puntatore base banked del file pattern
+'
+' NOTE: gPatOffset e gNRows sono gia' dichiarate in globals.bas.
+'       Qui si dichiara solo gModeViewer che e' specifica del viewer.
 '
 ' Schermo: testo 40 colonne x 24 righe (MO6/PC128)
 ' Riga 0 : titolo
@@ -27,8 +30,6 @@
 ' =============================================================================
 
 DIM gModeViewer AS BYTE : GLOBAL gModeViewer
-DIM gNRows      AS BYTE : GLOBAL gNRows
-DIM gPatOffset  AS WORD : GLOBAL gPatOffset
 
 PROCEDURE viewer_entry
     ON CPU6809 BEGIN ASM
@@ -206,13 +207,15 @@ vw_draw_coltitles:
         RTS
 
 ; --- DISEGNA TUTTE LE RIGHE VISIBILI ---
+; Fix: ABA non esiste sul 6809. Sostituito con PSHS B / ADDA ,S+
 vw_draw_all_rows:
         CLRB
 vw_dar_loop:
         CMPB    #VW_MAX_ROWS
         BEQ     vw_dar_done
-        LDA     0,S
-        ABA
+        LDA     0,S             ; vwRowTop
+        PSHS    B               ; salva B sullo stack
+        ADDA    ,S+             ; A = vwRowTop + B  (e recupera B dallo stack)
         CMPA    _gNRows
         BHS     vw_dar_done
         PSHS    A,B
@@ -227,6 +230,7 @@ vw_dar_done:
         RTS
 
 ; --- FETCH ROW: A=indice riga assoluta -> scrive in 2,S (rowBuf) ---
+; Nota offset: chiamata con PSHS A,B (2 byte) => rowBuf e' a 2+2=4,S qui dentro
 vw_fetch_row:
         PSHS    A,B,X,Y
         LDB     #VW_ROW_SIZE
@@ -234,7 +238,7 @@ vw_fetch_row:
         ADDD    _gPatOffset
         TFR     D,X
         LEAX    _patFile,X
-        LEAY    6,S             ; rowBuf (2 byte originali + 4 byte da PSHS A,B,X,Y)
+        LEAY    6,S             ; rowBuf: 2 orig + 4 da PSHS A,B,X,Y
         LDB     #VW_ROW_SIZE
 vw_fr_loop:
         LDA     ,X+
@@ -250,10 +254,10 @@ vw_draw_one_row:
         TFR     B,A
         ADDA    #VW_YOFF_DATA
         PSHS    A               ; y corrente su stack
-        LEAX    4,S             ; rowBuf (2 orig + PSHS A,B,X=3 + PSHS A=1 = offset 4 da cima)
+        LEAX    4,S             ; rowBuf: 2 orig + PSHS A,B,X(3) + PSHS A(1) = 4 da cima
 
         LDA     #VW_COL_ROW : LDB ,S : JSR vw_locate
-        LDA     3,S             ; riga assoluta (terzo byte pushato A,B,X)
+        LDA     3,S             ; riga assoluta
         JSR     vw_putdec
 
         LDA     #VW_COL_DIV : LDB ,S : JSR vw_locate
@@ -337,7 +341,7 @@ vw_hk_right:
         JSR     vw_cls : JSR vw_draw_header : JSR vw_draw_coltitles : JSR vw_draw_all_rows
         RTS
 
-; --- RELOAD PAT HDR: ricalcola _gPatOffset e _gNRows ---
+; --- RELOAD PAT HDR: ricalcola _gPatOffset e _gNRows per _gCurPattern ---
 vw_reload_pat_hdr:
         PSHS    A,B,X
         LDA     _gCurPattern
