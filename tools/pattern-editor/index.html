@@ -159,7 +159,6 @@ const STUTTER_REPS     = [1,2,4,8, 2,4,2,4, 2,4,2,4];
 const STUTTER_DELTA_HI = [1,1,1,1, 1,1,1,1, 0,0,0,0];
 const STUTTER_DELTA_LO = [0,0,0,0, 0x0F,0x0F,0x1F,0x1F, 0xF2,0xF2,0xE4,0xE4];
 
-// DIV max = 32 (64 not supported)
 const DIVS = [1,2,4,8,16,32];
 
 const WAV_BASE  = 'https://raw.githubusercontent.com/w4ller/olibreakbeats/main/wav/';
@@ -197,9 +196,15 @@ let currentPat=0;
 
 // =============================================================================
 // AUDIO ENGINE
-// play_note_ex mirror from player.bas
-// Rate clamped to [0.25, 16] to prevent near-zero slowdown
-// Row duration capped at chunkMs * reps * 2 as safety net
+//
+// MO6 stutter behaviour (mirrors ASM loop in patterns.bas):
+//   chunkSz  = bufLen / div          (original chunk size)
+//   off      = chunkSz * actualIdx   (FIXED for all reps — same chunk repeated)
+//   subSz    = chunkSz / reps        (each rep plays 1/reps of the chunk)
+//   Each rep reads subSz samples from off..off+subSz, with evolving pitch.
+//   Total duration = chunkSz samples = same as no-stutter.
+//
+// resampleChunk: output is always exactly n frames (fixed wall-clock duration).
 // =============================================================================
 let audioCtx=null, audioBuffers={}, masterGain=null, analyser=null, vuFrameId=null;
 const audioStatus=document.getElementById('audio-status');
@@ -225,22 +230,30 @@ async function initAudio(){
   }
 }
 
-function makeFwdSlice(buf, offset, n){
-  const len=Math.min(n, buf.length-offset);
-  if(len<=0) return null;
-  const out=audioCtx.createBuffer(buf.numberOfChannels,len,buf.sampleRate);
-  for(let ch=0;ch<buf.numberOfChannels;ch++)
-    out.copyToChannel(buf.getChannelData(ch).subarray(offset,offset+len),ch);
-  return out;
-}
-
-function makeRevSlice(buf, offset, n){
-  const len=Math.min(n, buf.length-offset);
-  if(len<=0) return null;
-  const out=audioCtx.createBuffer(buf.numberOfChannels,len,buf.sampleRate);
-  for(let ch=0;ch<buf.numberOfChannels;ch++){
-    const src=buf.getChannelData(ch), dst=out.getChannelData(ch);
-    for(let i=0;i<len;i++) dst[i]=src[offset+len-1-i];
+// ---------------------------------------------------------------------------
+// resampleChunk — pitch-shift with FIXED output duration
+// output = always n frames; source window clamped, remainder zero-padded
+// ---------------------------------------------------------------------------
+function resampleChunk(buf, offset, n, rate, reverse){
+  if(n <= 0) return null;
+  const nCh = buf.numberOfChannels;
+  const out  = audioCtx.createBuffer(nCh, n, buf.sampleRate);
+  const available = buf.length - Math.max(0, offset);
+  if(available <= 0) return out;
+  const srcSpan = Math.min(n * rate, available);
+  const step    = srcSpan / n;
+  for(let ch=0; ch<nCh; ch++){
+    const src = buf.getChannelData(ch);
+    const dst = out.getChannelData(ch);
+    for(let i=0; i<n; i++){
+      const si = reverse
+        ? offset + srcSpan - 1 - i * step
+        : offset + i * step;
+      if(si < 0 || si >= buf.length){ dst[i]=0; continue; }
+      const si0 = si|0;
+      const si1 = Math.min(si0+1, buf.length-1);
+      dst[i] = src[si0]*(1-(si-si0)) + src[si1]*(si-si0);
+    }
   }
   return out;
 }
@@ -251,18 +264,16 @@ function stopAllSources(){
   activeSources=[];
 }
 
-function scheduleBuffer(sliceBuf, rate, atTime){
+function scheduleBuffer(sliceBuf, atTime){
   if(!sliceBuf) return 0;
-  // Clamp rate: min 0.25 (4x slow max), max 16 — prevents near-zero lockup
-  const clampedRate = Math.max(0.25, Math.min(rate, 16));
   const src=audioCtx.createBufferSource();
   src.buffer=sliceBuf;
-  src.playbackRate.value=clampedRate;
+  src.playbackRate.value=1;
   src.connect(masterGain);
   src.start(atTime);
   activeSources.push(src);
   src.onended=()=>{activeSources=activeSources.filter(x=>x!==src);};
-  return sliceBuf.length/(sliceBuf.sampleRate*clampedRate);
+  return sliceBuf.length / sliceBuf.sampleRate;
 }
 
 function playNoteEx(row){
@@ -285,44 +296,50 @@ function playNoteEx(row){
   const reps = STUTTER_REPS[sm] || 1;
   const div  = row.div;
 
-  // IDX: 255=RND in [0,div-1], else clamp to div-1
   const actualIdx = (row.idx===0xFF)
     ? Math.floor(Math.random()*div)
     : Math.min(row.idx, div-1);
 
-  const baseRate = row.stepHi + row.stepLo/256;
+  // chunkSz: size of the full chunk on the div grid (same as no-stutter)
+  const chunkSz = Math.floor(rawBuf.length / div);
+  // off: START of this chunk — FIXED for all reps (same chunk repeated)
+  const off     = chunkSz * actualIdx;
+
   const t0 = audioCtx.currentTime;
   let t = t0, totalSec = 0;
 
-  if(reps===1){
-    const chunkSz = Math.floor(rawBuf.length / div);
-    const off = chunkSz * actualIdx;
-    const slice = doRev ? makeRevSlice(rawBuf,off,chunkSz) : makeFwdSlice(rawBuf,off,chunkSz);
-    totalSec = scheduleBuffer(slice, baseRate, t);
-  } else {
-    const newDiv     = div * reps;
-    const newChunkSz = Math.floor(rawBuf.length / newDiv);
-    const baseIdx    = actualIdx * reps;
-    const dHi = STUTTER_DELTA_HI[sm], dLo = STUTTER_DELTA_LO[sm];
-    let curHi = row.stepHi, curLo = row.stepLo;
+  if(reps === 1){
+    // no stutter — play whole chunk once
+    const slice = resampleChunk(rawBuf, off, chunkSz, row.stepHi + row.stepLo/256, doRev);
+    totalSec    = scheduleBuffer(slice, t);
 
-    // Cap: each rep can be at most newChunkSz/sampleRate/0.25 seconds
-    // i.e. max 4x slowdown per rep; total row won't exceed that * reps
+  } else {
+    // stutter — divide chunkSz into reps equal sub-slices,
+    // each reads from the SAME offset (start of the chunk),
+    // with evolving pitch. Total duration = chunkSz (unchanged).
+    const subSz = Math.floor(chunkSz / reps);
+    const dHi   = STUTTER_DELTA_HI[sm];
+    const dLo   = STUTTER_DELTA_LO[sm];
+    let curHi   = row.stepHi, curLo = row.stepLo;
+
     for(let r=0; r<reps; r++){
-      const off   = newChunkSz * baseIdx;
       const rate  = curHi + curLo/256;
-      const slice = doRev ? makeRevSlice(rawBuf,off,newChunkSz) : makeFwdSlice(rawBuf,off,newChunkSz);
-      const dur   = scheduleBuffer(slice, rate, t); // rate already clamped inside
+      // Each rep starts at 'off' (same chunk), reads subSz frames at 'rate'
+      const slice = resampleChunk(rawBuf, off, subSz, rate, doRev);
+      const dur   = scheduleBuffer(slice, t);
       t        += dur;
       totalSec += dur;
-      // 8.8 fixed-point pitch multiply
-      const product = (curHi*dHi*256) + (curHi*dLo) + (curLo*dHi);
-      curHi = (product>>8)&0xFF;
-      curLo = product&0xFF;
+
+      // 8.8 × 8.8 fixed-point multiply (mirrors ASM MULW)
+      const iCur = (curHi<<8)|curLo;
+      const iDel = (dHi<<8)|dLo;
+      const prod = (Math.imul(iCur, iDel) >>> 0) >>> 8;
+      curHi = (prod>>8)&0xFF;
+      curLo =  prod   &0xFF;
     }
   }
 
-  return Math.max(20, totalSec*1000);
+  return Math.max(20, totalSec * 1000);
 }
 
 function startVU(){
@@ -400,10 +417,7 @@ function mkSel(opts,val,cb){
   return s;
 }
 
-// IDX field: numeric 0..div-1 + separate RND checkbox style selector
-// We use a select with options 0..div-1 + 255=RND
 function mkIdxSel(row, ri, divRef){
-  // Build options: 0 to div-1, then RND
   function buildOpts(div){
     const opts=[];
     for(let i=0;i<div;i++) opts.push({val:i,label:String(i)});
@@ -416,7 +430,6 @@ function mkIdxSel(row, ri, divRef){
     buildOpts(div).forEach(o=>{
       const op=document.createElement('option');
       op.value=o.val; op.textContent=o.label;
-      // If current row.idx > div-1 and not 255, clamp to 0
       const cur=patterns[currentPat].rows[ri].idx;
       const sel= (o.val===255 && cur===255) || (o.val===cur && cur<div);
       if(sel) op.selected=true;
@@ -428,7 +441,6 @@ function mkIdxSel(row, ri, divRef){
   s.addEventListener('change',()=>{
     patterns[currentPat].rows[ri].idx=parseInt(s.value);
   });
-  // expose repopulate so DIV select can call it
   s._repopulate=populate;
   return s;
 }
@@ -478,39 +490,28 @@ function renderRows(){
     rn.className='row-num'; rn.textContent=String(ri+1).padStart(2,'0');
     line.appendChild(rn);
 
-    // DIV select — when changed, repopulate IDX options
-    // Use a ref object so mkIdxSel can read current div
     const divRef={val:row.div, get(){return this.val;}};
-    let idxSelEl; // set after mkIdxSel
+    let idxSelEl;
 
     const divSel=mkSel(DIVS.map(d=>({val:d,label:String(d)})),row.div,v=>{
       rows[ri].div=v;
       divRef.val=v;
-      // If current idx out of range, clamp to 0
       if(rows[ri].idx!==255 && rows[ri].idx>=v) rows[ri].idx=0;
       if(idxSelEl) idxSelEl._repopulate(v);
     });
     line.appendChild(cell(divSel));
 
-    // IDX select (0..div-1 + FF=RND)
     idxSelEl=mkIdxSel(row, ri, divRef);
     line.appendChild(cell(idxSelEl));
 
-    // STEP HI / LO
     const stepSub=sublabel(stepDesc(row.stepHi,row.stepLo));
     line.appendChild(cell(mkHex(row.stepHi,v=>{rows[ri].stepHi=v;stepSub.textContent=stepDesc(rows[ri].stepHi,rows[ri].stepLo);})));
     line.appendChild(cell(mkHex(row.stepLo,v=>{rows[ri].stepLo=v;stepSub.textContent=stepDesc(rows[ri].stepHi,rows[ri].stepLo);}),stepSub));
 
-    // WAVE
     line.appendChild(cell(mkSel(WAVES,row.waveId,v=>rows[ri].waveId=v)));
-
-    // STUTTER
     line.appendChild(cell(mkSel(STUTTERS,row.stutterMode,v=>rows[ri].stutterMode=v)));
-
-    // REVERSE
     line.appendChild(cell(mkSel(REVERSES,row.reverseMode,v=>rows[ri].reverseMode=v)));
 
-    // PROB
     const probBar=document.createElement('div');
     probBar.className='prob-bar'; probBar.style.width=Math.round(row.prob/255*100)+'%';
     const probPct=sublabel((row.prob===255?'100':Math.round(row.prob/2.55))+'%');
@@ -521,7 +522,6 @@ function renderRows(){
     });
     line.appendChild(cell(probInp,probBar,probPct));
 
-    // DELETE
     const del=document.createElement('div');
     del.className='row-del'; del.textContent='×'; del.title='Rimuovi riga';
     del.onclick=()=>{patterns[currentPat].rows.splice(ri,1);renderRows();};
@@ -629,17 +629,17 @@ function tick(){
   const el=rowsCont.querySelector('[data-ri="'+ri+'"]');
   if(el){el.classList.add('playing'); el.scrollIntoView({block:'nearest',behavior:'smooth'});}
 
-  const wId    = row.waveId===0xFF ? '?' : row.waveId;
-  const rawBuf = audioBuffers[wId];
-  const smDisp = row.stutterMode < 0x10 ? row.stutterMode : 0;
-  const reps   = STUTTER_REPS[smDisp]||1;
-  const dispChunk = rawBuf ? Math.round(Math.floor(rawBuf.length/(row.div*reps))/rawBuf.sampleRate*1000) : 0;
+  const smDisp  = (row.stutterMode < 0x10) ? row.stutterMode : 0;
+  const reps    = STUTTER_REPS[smDisp]||1;
+  const rawBuf  = audioBuffers[row.waveId===0xFF ? 0 : row.waveId];
+  const chunkSz = rawBuf ? Math.floor(rawBuf.length / row.div) : 0;
+  const subSzMs = rawBuf ? Math.round((chunkSz/reps)/rawBuf.sampleRate*1000) : 0;
+
   playProgress.style.width=((ri+1)/rows.length*100).toFixed(0)+'%';
   playStatus.textContent='▶  '+patterns[playPatIdx].name+'  — loop';
   playRowInfo.textContent=
     'row '+(ri+1)+'/'+rows.length+
-    '  div:'+row.div+(reps>1?' st×'+reps:'')+
-    '  chunk≈'+dispChunk+'ms'+
+    '  div:'+row.div+(reps>1?' st×'+reps+' ('+subSzMs+'ms×'+reps+')':'')+
     '  '+(WAVES.find(x=>x.val===row.waveId)?.label||'?')+
     '  '+stepDesc(row.stepHi,row.stepLo);
 
