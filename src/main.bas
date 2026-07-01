@@ -25,7 +25,7 @@ gCurPattern = 0
 gModeAll    = 0
 gModeStop   = 0
 gPatChanged = 0
-set_tempo[30]
+set_tempo[150]
 
 DO
     IF gModeStop = 0 THEN
