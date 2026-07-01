@@ -44,25 +44,21 @@ END PROC
 ' Formula: newDelay = 24 * 150 / bpm = 3600 / bpm
 ' Range utile: 50-300 BPM
 ' =============================================================================
-PROCEDURE set_tempo[targetBPM AS BYTE]
+PROCEDURE set_tempo[bpm AS INTEGER]
     DIM newDelay AS INTEGER
-    DIM baseBPM AS BYTE
 
-    baseBPM = 150  :' Il tempo base con delay=24
+    ' delay=24 -> 150 BPM  => newDelay = 3600 / bpm
+    newDelay = 3600 / bpm
 
-    ' Calcola il nuovo delay inversamente proporzionale ai BPM
-    ' Se 150 BPM -> delay 24
-    ' Allora targetBPM -> delay = 24 * (150 / targetBPM)
-    newDelay = (24 * baseBPM) / targetBPM  :' = 3600 / targetBPM
-
-    ' Limita il range per sicurezza
-    IF newDelay < 12 THEN newDelay = 12  :' max 300 BPM
-    IF newDelay > 48 THEN newDelay = 48  :' min 75 BPM
+    ' Limita il range per sicurezza (300 BPM min delay=12, 50 BPM max delay=72)
+    IF newDelay < 12 THEN newDelay = 12  :' max ~300 BPM
+    IF newDelay > 72 THEN newDelay = 72  :' min ~50 BPM
 
     gPlaybackDelay(0) = newDelay
 
-    ' Salva il fattore per compensazione step
-    gTempoFactor = (targetBPM * 128) / baseBPM
+    ' gTempoFactor: normalizzato su 150 BPM base (128 = 150 BPM)
+    ' Usato da play_note_ex per compensare il pitch al variare del tempo
+    gTempoFactor = (bpm * 128) / 150
 END PROC
 
 
