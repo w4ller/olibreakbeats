@@ -7,6 +7,11 @@
 '   1=$0A  2=$12  3=$1A  4=$22  5=$2A
 '   6=$32  7=$33  8=$2B  9=$23
 '
+' Tasti BPM (da verificare sul hardware reale MO6):
+'   BPM+  : freccia UP    = $44  (o $3A per tasto +)
+'   BPM-  : freccia DOWN  = $4C  (o $31 per tasto -)
+'   BPM=150: tasto T      = $17
+'
 ' gKeyPressed : raw scan code (0 = no key)
 ' gCurPattern : 0..gNPat(0)-1, current pattern index
 ' gModeAll    : 1 = play all patterns in loop
@@ -48,6 +53,8 @@ END PROC
 ' S         -> gModeStop=1, gModeAll=0  (stop)
 ' A         -> gModeAll=1, gModeStop=0  (play all)
 ' N/P/1-9   -> gCurPattern updated, gPatChanged=1 (immediate switch)
+' UP/DOWN   -> tempo_up / tempo_down (step 5 BPM)
+' T         -> set_tempo_by_bpm[150]   (reset a 150 BPM)
 ' =============================================================================
 PROC handle_key
     IF gKeyPressed = 0 OR gKeyPressed = gLastKey THEN
@@ -97,5 +104,18 @@ PROC handle_key
         CASE $33 : gCurPattern = 6 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 7
         CASE $2B : gCurPattern = 7 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 8
         CASE $23 : gCurPattern = 8 : gModeAll = 0 : gModeStop = 0 : gPatChanged = 1 :' 9
+
+        ' --- Controllo BPM ---
+        ' ATTENZIONE: scan code da verificare sul hardware MO6 reale.
+        ' Sostituire $44/$4C/$17 con i codici corretti se necessario.
+        CASE $44 :' freccia UP (o tasto +) -> BPM su
+            CALL tempo_up
+
+        CASE $4C :' freccia DOWN (o tasto -) -> BPM giu
+            CALL tempo_down
+
+        CASE $17 :' T -> reset 150 BPM
+            set_tempo_by_bpm[150]
+
     ENDSELECT
 END PROC

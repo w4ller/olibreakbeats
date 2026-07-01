@@ -2,7 +2,8 @@
 ' PLAY_CHUNK_ASM
 ' Outputs gChunkSize samples from gWaveBase at 8.8 fixed-point step.
 ' Legge dalla fine del BANK corrente (settato da gWavBank).
-' Timing loop: ~125us per sample = ~8kHz.
+' Timing loop: overhead=47 cicli fissi + (5*B-1) cicli delay = 46+5*B totale.
+' CPU ~996kHz -> B=24 produce ~6000 Hz = 9600 samples/bar @ 150 BPM.
 ' Bank is restored to 7 after playback.
 ' =============================================================================
 PROC play_chunk_asm
@@ -18,7 +19,7 @@ PCH_LOOP:
         LDA   0,X
         STA   $A7CD
 
-        LDB   _gPlaybackDelay 
+        LDB   _gPlaybackDelay
 PCH_DLY:
         DECB
         BNE   PCH_DLY
@@ -38,39 +39,116 @@ PCH_DLY:
     END ASM ON CPU6809
 END PROC
 
-' SET_TEMPO  [bpm]
-' Imposta il tempo di riproduzione in BPM assoluti.
-' Base: delay=24 corrisponde a ~150 BPM.
-' Formula: newDelay = 24 * 150 / bpm = 3600 / bpm
-' Range utile: 50-300 BPM
+
 ' =============================================================================
-PROCEDURE set_tempo[targetBPM AS BYTE]
+' SET_TEMPO  [bpm]
+' Imposta il tempo in BPM assoluti tramite formula.
+' Formula: delay = 3600 / bpm  (calibrata su delay=24 @ 150 BPM = esatto)
+' Per BPM presenti nella lookup table, preferire set_tempo_by_bpm.
+' =============================================================================
+PROCEDURE set_tempo[bpm AS INTEGER]
     DIM newDelay AS INTEGER
-    DIM baseBPM AS BYTE
 
-    baseBPM = 150  :' Il tempo base con delay=24
+    newDelay = 3600 / bpm
 
-    ' Calcola il nuovo delay inversamente proporzionale ai BPM
-    ' Se 150 BPM -> delay 24
-    ' Allora targetBPM -> delay = 24 * (150 / targetBPM)
-    newDelay = (24 * baseBPM) / targetBPM  :' = 3600 / targetBPM
-
-    ' Limita il range per sicurezza
-    IF newDelay < 12 THEN newDelay = 12  :' max 300 BPM
-    IF newDelay > 48 THEN newDelay = 48  :' min 75 BPM
+    IF newDelay < 16 THEN newDelay = 16  :' max ~225 BPM
+    IF newDelay > 32 THEN newDelay = 32  :' min ~112 BPM
 
     gPlaybackDelay(0) = newDelay
-
-    ' Salva il fattore per compensazione step
-    gTempoFactor = (targetBPM * 128) / baseBPM
+    gTempoFactor = (bpm * 128) / 150
 END PROC
+
+
+' =============================================================================
+' SET_TEMPO_BY_INDEX  [idx]
+' Imposta il tempo tramite indice diretto nella lookup (0=120BPM .. 16=200BPM).
+' Operazione O(1): solo array lookup, nessun calcolo.
+' =============================================================================
+PROCEDURE set_tempo_by_index[idx AS BYTE]
+    IF idx > 16 THEN idx = 16
+
+    gTempoIndex       = idx
+    gPlaybackDelay(0) = bpmDelayLookup(idx)
+    gTempoFactor      = stepCompLookup(idx)
+END PROC
+
+
+' =============================================================================
+' SET_TEMPO_BY_BPM  [targetBPM]
+' Trova il BPM piu vicino nella lookup table e imposta delay + stepComp.
+' Se il BPM e nella tabella, corrisponde a set_tempo_by_index (esatto).
+' =============================================================================
+PROCEDURE set_tempo_by_bpm[targetBPM AS BYTE]
+    DIM i      AS BYTE
+    DIM bestIdx AS BYTE
+    DIM minDiff AS BYTE
+    DIM diff    AS BYTE
+
+    bestIdx = 6    :' default 150 BPM
+    minDiff = 255
+
+    FOR i = 0 TO 16
+        IF bpmLookup(i) = targetBPM THEN
+            bestIdx = i
+            minDiff = 0
+            i = 17  :' exit loop
+        ELSE
+            IF targetBPM > bpmLookup(i) THEN
+                diff = targetBPM - bpmLookup(i)
+            ELSE
+                diff = bpmLookup(i) - targetBPM
+            ENDIF
+            IF diff < minDiff THEN
+                minDiff = diff
+                bestIdx = i
+            ENDIF
+        ENDIF
+    NEXT i
+
+    set_tempo_by_index[bestIdx]
+END PROC
+
+
+' =============================================================================
+' TEMPO_UP
+' Aumenta il tempo di uno step nella lookup (passo 5 BPM).
+' =============================================================================
+PROCEDURE tempo_up
+    IF gTempoIndex < 16 THEN
+        gTempoIndex       = gTempoIndex + 1
+        gPlaybackDelay(0) = bpmDelayLookup(gTempoIndex)
+        gTempoFactor      = stepCompLookup(gTempoIndex)
+    ENDIF
+END PROC
+
+
+' =============================================================================
+' TEMPO_DOWN
+' Diminuisce il tempo di uno step nella lookup (passo 5 BPM).
+' =============================================================================
+PROCEDURE tempo_down
+    IF gTempoIndex > 0 THEN
+        gTempoIndex       = gTempoIndex - 1
+        gPlaybackDelay(0) = bpmDelayLookup(gTempoIndex)
+        gTempoFactor      = stepCompLookup(gTempoIndex)
+    ENDIF
+END PROC
+
+
+' =============================================================================
+' GET_CURRENT_BPM
+' Ritorna il valore BPM nominale corrente dalla lookup.
+' =============================================================================
+FUNCTION get_current_bpm AS BYTE
+    RETURN bpmLookup(gTempoIndex)
+END FUNCTION
 
 
 ' =============================================================================
 ' PLAY_CHUNK_ASM_REV
 ' Come play_chunk_asm ma legge il chunk al contrario.
 ' gWaveBase deve puntare all ULTIMO byte del chunk (non al primo).
-' Step e' POSITIVO (non negato): la routine lo sottrae tramite NEGA+LEAU.
+' Step e POSITIVO (non negato): la routine lo sottrae tramite NEGA+LEAU.
 '
 ' Tecnica decremento:
 '   ABX usa ACCB come UNSIGNED -> non puo fare decremento.
@@ -78,7 +156,7 @@ END PROC
 '   Es: step=1.0 -> A=1 -> NEGA -> A=$FF (-1) -> LEAU A,U -> U-=1. Corretto.
 '
 ' Registro U usato come puntatore (X resta libero per ugBasic).
-' Overhead vs play_chunk_asm: +2 cicli/sample (NEGA) = ~5% su 8kHz.
+' Overhead vs play_chunk_asm: +2 cicli/sample (NEGA) = ~5% su 6kHz.
 ' =============================================================================
 PROC play_chunk_asm_rev
     ON CPU6809 BEGIN ASM
@@ -222,14 +300,12 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
     DIM adjustedLo  AS BYTE
     DIM tempProduct AS INTEGER
 
-
- ' --- Compensa lo step per il tempo corrente ---
+    ' --- Compensa lo step per il tempo corrente ---
     ' step_compensato = step * (128 / gTempoFactor)
     ' Per mantenere il pitch quando il tempo cambia
     tempProduct = (stepHi * 256 + stepLo) * 128 / gTempoFactor
     adjustedHi = tempProduct / 256
     adjustedLo = tempProduct AND $FF
-
 
     IF reverseMode = $FF THEN
         doRev = RND(2)  :' 0=forward, 1=reverse
@@ -260,7 +336,6 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
             play_note_rev[chunkIdx, chunkDiv, adjustedHi, adjustedLo, waveId]
         ENDIF
     ELSE
-        ' ... usa adjustedHi/Lo nel loop stutter ...
         curHi = adjustedHi
         curLo = adjustedLo
         newDiv = chunkDiv * reps
