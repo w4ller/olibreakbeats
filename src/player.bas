@@ -38,6 +38,8 @@ PCH_DLY:
     END ASM ON CPU6809
 END PROC
 
+
+' =============================================================================
 ' SET_TEMPO  [bpm]
 ' Imposta il tempo di riproduzione in BPM assoluti.
 ' Base: delay=24 corrisponde a ~150 BPM.
@@ -50,18 +52,13 @@ PROCEDURE set_tempo[targetBPM AS BYTE]
 
     baseBPM = 150  :' Il tempo base con delay=24
 
-    ' Calcola il nuovo delay inversamente proporzionale ai BPM
-    ' Se 150 BPM -> delay 24
-    ' Allora targetBPM -> delay = 24 * (150 / targetBPM)
     newDelay = (24 * baseBPM) / targetBPM  :' = 3600 / targetBPM
 
-    ' Limita il range per sicurezza
     IF newDelay < 12 THEN newDelay = 12  :' max 300 BPM
     IF newDelay > 48 THEN newDelay = 48  :' min 75 BPM
 
     gPlaybackDelay(0) = newDelay
 
-    ' Salva il fattore per compensazione step
     gTempoFactor = (targetBPM * 128) / baseBPM
 END PROC
 
@@ -70,15 +67,7 @@ END PROC
 ' PLAY_CHUNK_ASM_REV
 ' Come play_chunk_asm ma legge il chunk al contrario.
 ' gWaveBase deve puntare all ULTIMO byte del chunk (non al primo).
-' Step e' POSITIVO (non negato): la routine lo sottrae tramite NEGA+LEAU.
-'
-' Tecnica decremento:
-'   ABX usa ACCB come UNSIGNED -> non puo fare decremento.
-'   LEAU A,U usa A come SIGNED 8-bit -> NEGA + LEAU A,U decrementa.
-'   Es: step=1.0 -> A=1 -> NEGA -> A=$FF (-1) -> LEAU A,U -> U-=1. Corretto.
-'
-' Registro U usato come puntatore (X resta libero per ugBasic).
-' Overhead vs play_chunk_asm: +2 cicli/sample (NEGA) = ~5% su 8kHz.
+' Step e POSITIVO (non negato): la routine lo sottrae tramite NEGA+LEAU.
 ' =============================================================================
 PROC play_chunk_asm_rev
     ON CPU6809 BEGIN ASM
@@ -117,16 +106,23 @@ END PROC
 
 ' =============================================================================
 ' PLAY_NOTE  [chunkIdx, chunkDiv, stepHi, stepLo, waveId]
-' chunkIdx = $FF -> random chunk in 0..chunkDiv-1
-' chunkDiv = number of equal slices the wave is divided into
-' stepHi/Lo = 8.8 fixed-point pitch multiplier
-' waveId   = 0..4 selects wave; $FF = random among 5 waves
+' Suona un chunk normalizzato a sotto-blocchi da 1/16 di battuta (600 campioni).
+' Ogni div produce sempre 16/div chiamate ASM da 600 campioni:
+'   div=1  -> 16 sotto-chunk  (intero wav)
+'   div=2  ->  8 sotto-chunk
+'   div=4  ->  4 sotto-chunk  (un quarto)
+'   div=8  ->  2 sotto-chunk  (un ottavo)
+'   div=16 ->  1 sotto-chunk  (un sedicesimo)
+' L overhead ugBasic e costante per battuta -> BPM stabili.
+' Limitazione: div <= 16, potenza di 2.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
     DIM actualIdx AS BYTE
     DIM addr      AS ADDRESS
-    DIM sz        AS INTEGER
     DIM wId       AS BYTE
+    DIM subCount  AS BYTE
+    DIM s         AS BYTE
+    DIM subBase   AS ADDRESS
 
     IF waveId = $FF THEN
         wId = RND(5)
@@ -140,30 +136,46 @@ PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo A
         actualIdx = chunkIdx
     ENDIF
 
-    sz            = 9600 / chunkDiv
-    gChunkSize(0) = sz / 256
-    gChunkSize(1) = sz AND $FF
-    addr          = waveAddress(wId) + (sz * actualIdx)
-    gWaveBase(0)  = addr / 256
-    gWaveBase(1)  = addr AND $FF
-    gWavBank(0)   = wavBank(wId)
+    ' Sotto-chunk fissi da 600 campioni (= 9600/16)
+    ' subCount = 16 / chunkDiv
+    subCount = 16 / chunkDiv
+
+    ' Indirizzo base del chunk selezionato
+    ' La dimensione del chunk originale e 9600/chunkDiv = subCount*600
+    subBase = waveAddress(wId) + (600 * subCount * actualIdx)
+
+    gChunkSize(0) = 0    :' 600 = $0258, hi=2, lo=88
+    gChunkSize(1) = 88   :' 600 AND $FF = 88... no: corretto sotto
+    ' 600 = $0258 -> hi=2, lo=$58=88
+    gChunkSize(0) = 2
+    gChunkSize(1) = $58
     gStepHi(0)    = stepHi
     gStepLo(0)    = stepLo
-    CALL play_chunk_asm
+    gWavBank(0)   = wavBank(wId)
+
+    FOR s = 0 TO subCount - 1
+        addr         = subBase + (600 * s)
+        gWaveBase(0) = addr / 256
+        gWaveBase(1) = addr AND $FF
+        CALL play_chunk_asm
+    NEXT s
 END PROC
 
 
 ' =============================================================================
 ' PLAY_NOTE_REV  [chunkIdx, chunkDiv, stepHi, stepLo, waveId]
-' Come play_note ma suona il chunk al contrario tramite play_chunk_asm_rev.
-' Step passato POSITIVO (non negato): e play_chunk_asm_rev che lo inverte.
-' gWaveBase punta all ultimo byte del chunk.
+' Come play_note ma suona i sotto-chunk al contrario tramite play_chunk_asm_rev.
+' Anche qui normalizzato a 1/16: subCount = 16/chunkDiv sotto-chunk da 600.
+' I sotto-chunk vengono emessi in ordine inverso e ciascuno letto al contrario.
+' gWaveBase punta all ultimo byte di ogni sotto-chunk.
 ' =============================================================================
 PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
     DIM actualIdx AS BYTE
     DIM addr      AS ADDRESS
-    DIM sz        AS INTEGER
     DIM wId       AS BYTE
+    DIM subCount  AS BYTE
+    DIM s         AS BYTE
+    DIM subBase   AS ADDRESS
 
     IF waveId = $FF THEN
         wId = RND(5)
@@ -177,21 +189,26 @@ PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, step
         actualIdx = chunkIdx
     ENDIF
 
-    sz = 9600 / chunkDiv
+    subCount = 16 / chunkDiv
+    subBase  = waveAddress(wId) + (600 * subCount * actualIdx)
 
-    ' Punta all ultimo byte del chunk
-    addr         = waveAddress(wId) + (sz * actualIdx) + sz - 1
-    gWaveBase(0) = addr / 256
-    gWaveBase(1) = addr AND $FF
-    gWavBank(0)  = wavBank(wId)
+    gChunkSize(0) = 2
+    gChunkSize(1) = $58
+    gStepHi(0)    = stepHi
+    gStepLo(0)    = stepLo
+    gWavBank(0)   = wavBank(wId)
 
-    gChunkSize(0) = sz / 256
-    gChunkSize(1) = sz AND $FF
-
-    ' Step positivo: e play_chunk_asm_rev che lo usa negato via NEGA+LEAU
-    gStepHi(0) = stepHi
-    gStepLo(0) = stepLo
-    CALL play_chunk_asm_rev
+    ' Sotto-chunk in ordine inverso, ciascuno letto al contrario
+    ' s va da subCount-1 a 0
+    s = subCount
+    DO
+        s = s - 1
+        ' Punta all ultimo byte del sotto-chunk s
+        addr         = subBase + (600 * s) + 599
+        gWaveBase(0) = addr / 256
+        gWaveBase(1) = addr AND $FF
+        CALL play_chunk_asm_rev
+    LOOP WHILE s > 0
 END PROC
 
 
@@ -204,7 +221,11 @@ END PROC
 '   1   = reverse
 '   255 = RND forward o reverse a runtime
 '
-' stutterMode: vedi play_note_stutter / globals.bas
+' stutterMode: vedi globals.bas
+' Con la normalizzazione a 1/16, lo stutter lavora su sotto-chunk da
+' 600/reps campioni se reps>1. Il div effettivo passato a play_note e
+' chunkDiv*reps, ma i campioni per chiamata ASM restano 600/reps.
+' Nota: stutter con reps > 16/chunkDiv non e supportato (subCount<1).
 ' =============================================================================
 PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE, reverseMode AS BYTE]
     DIM doRev       AS BYTE
@@ -218,21 +239,9 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
     DIM product     AS INTEGER
     DIM dHi         AS BYTE
     DIM dLo         AS BYTE
-    DIM adjustedHi  AS BYTE
-    DIM adjustedLo  AS BYTE
-    DIM tempProduct AS INTEGER
-
-
- ' --- Compensa lo step per il tempo corrente ---
-    ' step_compensato = step * (128 / gTempoFactor)
-    ' Per mantenere il pitch quando il tempo cambia
-    tempProduct = (stepHi * 256 + stepLo) * 128 / gTempoFactor
-    adjustedHi = tempProduct / 256
-    adjustedLo = tempProduct AND $FF
-
 
     IF reverseMode = $FF THEN
-        doRev = RND(2)  :' 0=forward, 1=reverse
+        doRev = RND(2)
     ELSE
         doRev = reverseMode
     ENDIF
@@ -255,14 +264,11 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
 
     IF reps = 1 THEN
         IF doRev = 0 THEN
-            play_note[chunkIdx, chunkDiv, adjustedHi, adjustedLo, waveId]
+            play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
         ELSE
-            play_note_rev[chunkIdx, chunkDiv, adjustedHi, adjustedLo, waveId]
+            play_note_rev[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
         ENDIF
     ELSE
-        ' ... usa adjustedHi/Lo nel loop stutter ...
-        curHi = adjustedHi
-        curLo = adjustedLo
         newDiv = chunkDiv * reps
 
         IF chunkIdx = $FF THEN
@@ -278,9 +284,9 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
 
         FOR r = 0 TO reps - 1
             IF doRev = 0 THEN
-                play_note[baseIdx, newDiv, curHi, curLo, waveId]
+                play_note[baseIdx + r, newDiv, curHi, curLo, waveId]
             ELSE
-                play_note_rev[baseIdx, newDiv, curHi, curLo, waveId]
+                play_note_rev[baseIdx + r, newDiv, curHi, curLo, waveId]
             ENDIF
             product = (curHi * dHi * 256) + (curHi * dLo) + (curLo * dHi)
             curHi = product / 256
