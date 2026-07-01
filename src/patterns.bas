@@ -38,6 +38,49 @@ END PROC
 
 
 ' =============================================================================
+' PREROLL_ROW
+' Risolve tutti i valori $FF di gRow in valori concreti PRIMA del playback.
+' Chiamata da play_pattern dopo la BANK READ della row, prima di play_note_ex.
+' In questo modo play_note_ex non esegue nessuna RND durante l'audio:
+' l'overhead e' costante -> BPM stabili anche con idx/wave/stutter casuali.
+'
+' gRow layout: [div, idx, stepHi, stepLo, waveId, stutterMode, reverseMode, prob]
+' =============================================================================
+PROCEDURE preroll_row
+    ' --- waveId: $FF -> random 0..4 ---
+    IF gRow(4) = $FF THEN
+        gRow(4) = RND(5)
+    ENDIF
+
+    ' --- stutterMode: risolve i codici RND-range ---
+    IF gRow(5) = $FF THEN         :' full random 0..11
+        gRow(5) = RND(12)
+    ELSE IF gRow(5) = $FE THEN    :' pitch-up range 4..7
+        gRow(5) = 4 + RND(4)
+    ELSE IF gRow(5) = $FD THEN    :' pitch-down range 8..11
+        gRow(5) = 8 + RND(4)
+    ELSE IF gRow(5) = $FC THEN    :' pitch range 4..11
+        gRow(5) = 4 + RND(8)
+    ELSE IF gRow(5) = $FB THEN    :' flat stutter range 0..3
+        gRow(5) = RND(4)
+    ENDIF
+
+    ' --- reverseMode: $FF -> random 0 o 1 ---
+    IF gRow(6) = $FF THEN
+        gRow(6) = RND(2)
+    ENDIF
+
+    ' --- idx: $FF -> random 0..div-1 ---
+    ' Risolto per ultimo perche dipende da div (gRow(0)).
+    ' Anche il branch stutter in play_note_ex usava un secondo RND(chunkDiv):
+    ' ora trova sempre un valore concreto, nessuna RND durante l'audio.
+    IF gRow(1) = $FF THEN
+        gRow(1) = RND(gRow(0))
+    ENDIF
+END PROC
+
+
+' =============================================================================
 ' PLAY_PATTERN
 ' Plays the current pattern row by row, reading directly from the BANK.
 ' Row format: [div, idx, stepHi, stepLo, waveId, stutterMode, reverseMode, prob]
@@ -57,7 +100,7 @@ END PROC
 '   RND(256) restituisce 0..255; prob=128 -> ~50.4% di esecuzione.
 '
 ' Keyboard input is checked after each row via check_key + handle_key.
-' Exits immediately if gModeStop=1 (tasto S) or gPatChanged=1 (1-9/N/P).
+' Exits immediately if gModeStop=1 (tasto S) o gPatChanged=1 (1-9/N/P).
 ' =============================================================================
 PROCEDURE play_pattern
     DIM i    AS BYTE
@@ -66,6 +109,8 @@ PROCEDURE play_pattern
     i = 0
     DO
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
+        CALL preroll_row  :' risolve tutti i $FF prima dell'audio
+
         prob = gRow(7)
 
         IF prob = 255 THEN
