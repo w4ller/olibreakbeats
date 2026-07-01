@@ -132,91 +132,10 @@ END PROC
 
 ' --- Tempo control ---
 DIM gPlaybackDelay (1) AS BYTE FOR BANK READ : GLOBAL gPlaybackDelay  :' delay between samples
-DIM gTempoFactor   AS BYTE : GLOBAL gTempoFactor  :' tempo multiplier (128=normal @ 150BPM)
-DIM gTempoIndex    AS BYTE : GLOBAL gTempoIndex   :' current index in tempo lookup (6=150BPM)
+DIM gTempoFactor   AS BYTE : GLOBAL gTempoFactor  :' tempo multiplier (128=normal)
 
-' =============================================================================
-' TEMPO LOOKUP TABLES
-' Calcolati per: overhead=47 cicli, CPU=996kHz, 9600 samples/bar
-' Modello: total_cycles = 46 + 5*B  =>  B_esatto = (996000/rate - 46) / 5
-' dove rate = 9600 * BPM / (4*60)
-'
-' idx  BPM   delay  stepComp  actual_BPM  errore
-'   0   120    32     102      120.87     +0.87
-'   1   125    31     107      123.88     -1.12  (31 piu vicino di 30)
-'   2   130    29     111      130.37     +0.37
-'   3   135    28     115      133.87     -1.13
-'   4   140    26     119      141.48     +1.48  (26 piu vicino di 27)
-'   5   145    25     124      145.61     +0.61
-'   6   150    24     128      150.00     +0.00  <- esatto, base di riferimento
-'   7   155    23     132      154.66     -0.34
-'   8   160    22     137      159.62     -0.38
-'   9   165    21     141      164.90     -0.10
-'  10   170    20     145      170.55     +0.55
-'  11   175    19     149      176.60     +1.60
-'  12   180    18     154      183.09     +3.09  (nota: granularita bassa)
-'  13   185    18     158      183.09     -1.91
-'  14   190    17     162      190.08     +0.08
-'  15   195    17     166      190.08     -4.92  (limite granularita)
-'  16   200    16     171      200.00     +0.00  <- esatto
-' =============================================================================
-DIM bpmLookup     (17) AS BYTE : GLOBAL bpmLookup      :' BPM nominali
-DIM bpmDelayLookup(17) AS BYTE : GLOBAL bpmDelayLookup :' delay corrispondente
-DIM stepCompLookup(17) AS BYTE : GLOBAL stepCompLookup :' compensazione pitch (128=normale)
-
-
-' =============================================================================
-' INIT_TEMPO
-' Inizializza le lookup table e imposta il tempo di default a 150 BPM.
-' =============================================================================
+' Inizializza in INIT_TEMPO (nuova procedura)
 PROCEDURE init_tempo
-    ' BPM nominali
-    bpmLookup(0)=120  : bpmLookup(1)=125  : bpmLookup(2)=130  : bpmLookup(3)=135
-    bpmLookup(4)=140  : bpmLookup(5)=145  : bpmLookup(6)=150  : bpmLookup(7)=155
-    bpmLookup(8)=160  : bpmLookup(9)=165  : bpmLookup(10)=170 : bpmLookup(11)=175
-    bpmLookup(12)=180 : bpmLookup(13)=185 : bpmLookup(14)=190 : bpmLookup(15)=195
-    bpmLookup(16)=200
-
-    ' Delay calcolati: B = round((996000 / (9600*BPM/240) - 46) / 5)
-    bpmDelayLookup(0)=32  :' 120 BPM
-    bpmDelayLookup(1)=31  :' 125 BPM
-    bpmDelayLookup(2)=29  :' 130 BPM
-    bpmDelayLookup(3)=28  :' 135 BPM
-    bpmDelayLookup(4)=26  :' 140 BPM
-    bpmDelayLookup(5)=25  :' 145 BPM
-    bpmDelayLookup(6)=24  :' 150 BPM (esatto)
-    bpmDelayLookup(7)=23  :' 155 BPM
-    bpmDelayLookup(8)=22  :' 160 BPM
-    bpmDelayLookup(9)=21  :' 165 BPM
-    bpmDelayLookup(10)=20 :' 170 BPM
-    bpmDelayLookup(11)=19 :' 175 BPM
-    bpmDelayLookup(12)=18 :' 180 BPM
-    bpmDelayLookup(13)=18 :' 185 BPM (stesso delay di 180)
-    bpmDelayLookup(14)=17 :' 190 BPM
-    bpmDelayLookup(15)=17 :' 195 BPM (stesso delay di 190)
-    bpmDelayLookup(16)=16 :' 200 BPM (esatto)
-
-    ' Step compensation: (BPM * 128) / 150, normalizzato su 150 BPM
-    stepCompLookup(0)=102  :' 120 BPM
-    stepCompLookup(1)=107  :' 125 BPM
-    stepCompLookup(2)=111  :' 130 BPM
-    stepCompLookup(3)=115  :' 135 BPM
-    stepCompLookup(4)=119  :' 140 BPM
-    stepCompLookup(5)=124  :' 145 BPM
-    stepCompLookup(6)=128  :' 150 BPM (normale)
-    stepCompLookup(7)=132  :' 155 BPM
-    stepCompLookup(8)=137  :' 160 BPM
-    stepCompLookup(9)=141  :' 165 BPM
-    stepCompLookup(10)=145 :' 170 BPM
-    stepCompLookup(11)=149 :' 175 BPM
-    stepCompLookup(12)=154 :' 180 BPM
-    stepCompLookup(13)=158 :' 185 BPM
-    stepCompLookup(14)=162 :' 190 BPM
-    stepCompLookup(15)=166 :' 195 BPM
-    stepCompLookup(16)=171 :' 200 BPM
-
-    ' Default: 150 BPM (indice 6)
-    gTempoIndex        = 6
-    gPlaybackDelay(0)  = 24
-    gTempoFactor       = 128
+    gPlaybackDelay(0) = 24  :' default delay per ~8kHz
+    gTempoFactor = 128      :' normal speed
 END PROC
