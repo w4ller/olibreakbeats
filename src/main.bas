@@ -7,22 +7,25 @@
 ' gPatChanged=1 causes immediate exit from play_pattern (pattern switch).
 ' gModeStop=1 causes stop; check_key/handle_key polled in idle state.
 ' =============================================================================
+CLS
 
 INCLUDE "src/globals.bas"
 INCLUDE "src/dac.bas"
 INCLUDE "src/player.bas"
-INCLUDE "src/patterns.bas"
 INCLUDE "src/input.bas"
+INCLUDE "src/patterns.bas"
 
 CALL init_dac
 CALL init_waves
 CALL init_stutter
 CALL init_patterns
+CALL init_tempo
 
 gCurPattern = 0
 gModeAll    = 0
 gModeStop   = 0
 gPatChanged = 0
+set_tempo[30]
 
 DO
     IF gModeStop = 0 THEN

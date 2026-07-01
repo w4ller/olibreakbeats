@@ -128,3 +128,14 @@ PROCEDURE init_stutter
     stutterDeltaLo(4)=$0F  : stutterDeltaLo(5)=$0F  : stutterDeltaLo(6)=$1F  : stutterDeltaLo(7)=$1F
     stutterDeltaLo(8)=$F2  : stutterDeltaLo(9)=$F2  : stutterDeltaLo(10)=$E4 : stutterDeltaLo(11)=$E4
 END PROC
+
+
+' --- Tempo control ---
+DIM gPlaybackDelay (1) AS BYTE FOR BANK READ : GLOBAL gPlaybackDelay  :' delay between samples
+DIM gTempoFactor   AS BYTE : GLOBAL gTempoFactor  :' tempo multiplier (128=normal)
+
+' Inizializza in INIT_TEMPO (nuova procedura)
+PROCEDURE init_tempo
+    gPlaybackDelay(0) = 24  :' default delay per ~8kHz
+    gTempoFactor = 128      :' normal speed
+END PROC

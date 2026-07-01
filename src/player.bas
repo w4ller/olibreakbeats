@@ -18,7 +18,7 @@ PCH_LOOP:
         LDA   0,X
         STA   $A7CD
 
-        LDB   #24
+        LDB   _gPlaybackDelay 
 PCH_DLY:
         DECB
         BNE   PCH_DLY
@@ -36,6 +36,29 @@ PCH_DLY:
         LDA   #7
         STA   $A7E5
     END ASM ON CPU6809
+END PROC
+
+' SET_TEMPO  [bpmPercent]
+' Imposta il tempo di riproduzione come percentuale del normale.
+' bpmPercent: 50=metà velocità, 100=normale, 200=doppia velocità
+' Range utile: 50-200 per mantenere qualità audio accettabile
+' =============================================================================
+PROCEDURE set_tempo[bpmPercent AS BYTE]
+    DIM newDelay AS INTEGER
+
+    ' Calcola il nuovo delay: inversamente proporzionale ai BPM
+    ' delay = 24 * (100 / bpmPercent)
+    newDelay = (2400 / bpmPercent)
+
+    ' Limita il range per sicurezza
+    IF newDelay < 12 THEN newDelay = 12  :' max 200% speed
+    IF newDelay > 48 THEN newDelay = 48  :' min 50% speed
+
+    gPlaybackDelay(0) = newDelay
+
+    ' Salva il fattore per compensazione step
+    ' tempoFactor = bpmPercent * 128 / 100
+    gTempoFactor = (bpmPercent * 128) / 100
 END PROC
 
 
@@ -180,17 +203,29 @@ END PROC
 ' stutterMode: vedi play_note_stutter / globals.bas
 ' =============================================================================
 PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE, reverseMode AS BYTE]
-    DIM doRev   AS BYTE
-    DIM sm      AS BYTE
-    DIM r       AS BYTE
-    DIM newDiv  AS BYTE
-    DIM baseIdx AS BYTE
-    DIM reps    AS BYTE
-    DIM curHi   AS BYTE
-    DIM curLo   AS BYTE
-    DIM product AS INTEGER
-    DIM dHi     AS BYTE
-    DIM dLo     AS BYTE
+    DIM doRev       AS BYTE
+    DIM sm          AS BYTE
+    DIM r           AS BYTE
+    DIM newDiv      AS BYTE
+    DIM baseIdx     AS BYTE
+    DIM reps        AS BYTE
+    DIM curHi       AS BYTE
+    DIM curLo       AS BYTE
+    DIM product     AS INTEGER
+    DIM dHi         AS BYTE
+    DIM dLo         AS BYTE
+    DIM adjustedHi  AS BYTE
+    DIM adjustedLo  AS BYTE
+    DIM tempProduct AS INTEGER
+
+
+ ' --- Compensa lo step per il tempo corrente ---
+    ' step_compensato = step * (128 / gTempoFactor)
+    ' Per mantenere il pitch quando il tempo cambia
+    tempProduct = (stepHi * 256 + stepLo) * 128 / gTempoFactor
+    adjustedHi = tempProduct / 256
+    adjustedLo = tempProduct AND $FF
+
 
     IF reverseMode = $FF THEN
         doRev = RND(2)  :' 0=forward, 1=reverse
@@ -216,11 +251,14 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
 
     IF reps = 1 THEN
         IF doRev = 0 THEN
-            play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
+            play_note[chunkIdx, chunkDiv, adjustedHi, adjustedLo, waveId]
         ELSE
-            play_note_rev[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
+            play_note_rev[chunkIdx, chunkDiv, adjustedHi, adjustedLo, waveId]
         ENDIF
     ELSE
+        ' ... usa adjustedHi/Lo nel loop stutter ...
+        curHi = adjustedHi
+        curLo = adjustedLo
         newDiv = chunkDiv * reps
 
         IF chunkIdx = $FF THEN
