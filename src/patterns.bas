@@ -56,28 +56,41 @@ END PROC
 '   altri    -> esegui se RND(256) <= prob
 '   RND(256) restituisce 0..255; prob=128 -> ~50.4% di esecuzione.
 '
-' Keyboard input is checked after each row via check_key + handle_key.
-' Exits immediately if gModeStop=1 (tasto S) or gPatChanged=1 (1-9/N/P).
+' check_key+handle_key vengono chiamati una volta per battuta (ogni 9600
+' campioni emessi) anziche ogni row. Questo rende l'overhead di tastiera
+' costante e indipendente da div/stutter, stabilizzando i BPM a 147.8
+' su Furnace con qualsiasi combinazione di chunk.
 ' =============================================================================
 PROCEDURE play_pattern
-    DIM i    AS BYTE
-    DIM prob AS BYTE
+    DIM i        AS BYTE
+    DIM prob     AS BYTE
+    DIM rowSamps AS INTEGER  :' campioni emessi dalla row corrente
 
     i = 0
     DO
         BANK READ VARBANK(patFile) FROM VARBANKPTR(patFile) + gPatOffset + (i * 8) TO VARPTR(gRow) SIZE 8
+
         prob = gRow(7)
 
         IF prob = 255 THEN
             play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
+            rowSamps = 9600 / gRow(0)  :' div e' gRow(0)
         ELSE IF prob > 0 THEN
             IF RND(256) <= prob THEN
                 play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
             ENDIF
+            rowSamps = 9600 / gRow(0)
+        ELSE
+            rowSamps = 0  :' row saltata: prob=0, nessun campione emesso
         ENDIF
 
-        CALL check_key
-        CALL handle_key
+        gSamplesEmitted = gSamplesEmitted + rowSamps
+
+        IF gSamplesEmitted >= 9600 THEN
+            CALL check_key
+            CALL handle_key
+            gSamplesEmitted = gSamplesEmitted - 9600
+        ENDIF
 
         i = i + 1
     LOOP WHILE i < gNRows AND gModeStop = 0 AND gPatChanged = 0

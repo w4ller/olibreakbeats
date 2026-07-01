@@ -81,6 +81,12 @@ DIM stutterDeltaLo (12) AS BYTE : GLOBAL stutterDeltaLo  :' 8.8 pitch delta, lo 
 ' Reset to 0 by main.bas at the start of each play cycle.
 DIM gPatChanged AS BYTE : GLOBAL gPatChanged
 
+' --- Samples emitted counter (used by play_pattern for check_key throttle) ---
+' Incremented by play_pattern after each row by the number of samples emitted.
+' check_key+handle_key are called only when this reaches 9600 (one bar @ 150 BPM).
+' Reset to 0 after each keyboard check. Init to 0 at startup.
+DIM gSamplesEmitted AS INTEGER : GLOBAL gSamplesEmitted
+
 
 ' =============================================================================
 ' INIT_WAVES
