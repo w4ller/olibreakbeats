@@ -38,27 +38,27 @@ PCH_DLY:
     END ASM ON CPU6809
 END PROC
 
-' SET_TEMPO  [bpmPercent]
-' Imposta il tempo di riproduzione come percentuale del normale.
-' bpmPercent: 50=metà velocità, 100=normale, 200=doppia velocità
-' Range utile: 50-200 per mantenere qualità audio accettabile
+' SET_TEMPO  [bpm]
+' Imposta il tempo di riproduzione in BPM assoluti.
+' Base: delay=24 corrisponde a ~150 BPM.
+' Formula: newDelay = 24 * 150 / bpm = 3600 / bpm
+' Range utile: 50-300 BPM
 ' =============================================================================
-PROCEDURE set_tempo[bpmPercent AS BYTE]
+PROCEDURE set_tempo[bpm AS INTEGER]
     DIM newDelay AS INTEGER
 
-    ' Calcola il nuovo delay: inversamente proporzionale ai BPM
-    ' delay = 24 * (100 / bpmPercent)
-    newDelay = (2400 / bpmPercent)
+    ' delay=24 -> 150 BPM  => newDelay = 3600 / bpm
+    newDelay = 3600 / bpm
 
-    ' Limita il range per sicurezza
-    IF newDelay < 12 THEN newDelay = 12  :' max 200% speed
-    IF newDelay > 48 THEN newDelay = 48  :' min 50% speed
+    ' Limita il range per sicurezza (300 BPM min delay=12, 50 BPM max delay=72)
+    IF newDelay < 12 THEN newDelay = 12  :' max ~300 BPM
+    IF newDelay > 72 THEN newDelay = 72  :' min ~50 BPM
 
     gPlaybackDelay(0) = newDelay
 
-    ' Salva il fattore per compensazione step
-    ' tempoFactor = bpmPercent * 128 / 100
-    gTempoFactor = (bpmPercent * 128) / 100
+    ' gTempoFactor: normalizzato su 150 BPM base (128 = 150 BPM)
+    ' Usato da play_note_ex per compensare il pitch al variare del tempo
+    gTempoFactor = (bpm * 128) / 150
 END PROC
 
 
@@ -89,7 +89,7 @@ PCR_LOOP:
         LDA   0,U
         STA   $A7CD
 
-        LDB   #24
+        LDB   _gPlaybackDelay
 PCR_DLY:
         DECB
         BNE   PCR_DLY
