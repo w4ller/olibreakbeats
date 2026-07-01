@@ -113,8 +113,8 @@ END PROC
 '   div=4  ->  4 sotto-chunk  (un quarto)
 '   div=8  ->  2 sotto-chunk  (un ottavo)
 '   div=16 ->  1 sotto-chunk  (un sedicesimo)
-' L overhead ugBasic e costante per battuta -> BPM stabili.
-' Limitazione: div <= 16, potenza di 2.
+' Se div > 16 (es. stutter con newDiv=32), subCount viene cappato a 1:
+' si emette sempre almeno 1 sotto-chunk da 600 campioni.
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
     DIM actualIdx AS BYTE
@@ -136,18 +136,17 @@ PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo A
         actualIdx = chunkIdx
     ENDIF
 
-    ' Sotto-chunk fissi da 600 campioni (= 9600/16)
-    ' subCount = 16 / chunkDiv
-    subCount = 16 / chunkDiv
+    ' subCount = 16 / chunkDiv, minimo 1
+    IF chunkDiv <= 16 THEN
+        subCount = 16 / chunkDiv
+    ELSE
+        subCount = 1
+    ENDIF
 
-    ' Indirizzo base del chunk selezionato
-    ' La dimensione del chunk originale e 9600/chunkDiv = subCount*600
+    ' Indirizzo base: ogni chunk occupa subCount*600 byte nel bank
     subBase = waveAddress(wId) + (600 * subCount * actualIdx)
 
-    gChunkSize(0) = 0    :' 600 = $0258, hi=2, lo=88
-    gChunkSize(1) = 88   :' 600 AND $FF = 88... no: corretto sotto
-    ' 600 = $0258 -> hi=2, lo=$58=88
-    gChunkSize(0) = 2
+    gChunkSize(0) = 2    :' 600 = $0258
     gChunkSize(1) = $58
     gStepHi(0)    = stepHi
     gStepLo(0)    = stepLo
@@ -165,9 +164,7 @@ END PROC
 ' =============================================================================
 ' PLAY_NOTE_REV  [chunkIdx, chunkDiv, stepHi, stepLo, waveId]
 ' Come play_note ma suona i sotto-chunk al contrario tramite play_chunk_asm_rev.
-' Anche qui normalizzato a 1/16: subCount = 16/chunkDiv sotto-chunk da 600.
-' I sotto-chunk vengono emessi in ordine inverso e ciascuno letto al contrario.
-' gWaveBase punta all ultimo byte di ogni sotto-chunk.
+' subCount cappato a 1 se chunkDiv > 16.
 ' =============================================================================
 PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
     DIM actualIdx AS BYTE
@@ -189,8 +186,13 @@ PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, step
         actualIdx = chunkIdx
     ENDIF
 
-    subCount = 16 / chunkDiv
-    subBase  = waveAddress(wId) + (600 * subCount * actualIdx)
+    IF chunkDiv <= 16 THEN
+        subCount = 16 / chunkDiv
+    ELSE
+        subCount = 1
+    ENDIF
+
+    subBase = waveAddress(wId) + (600 * subCount * actualIdx)
 
     gChunkSize(0) = 2
     gChunkSize(1) = $58
@@ -199,11 +201,9 @@ PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, step
     gWavBank(0)   = wavBank(wId)
 
     ' Sotto-chunk in ordine inverso, ciascuno letto al contrario
-    ' s va da subCount-1 a 0
     s = subCount
     DO
         s = s - 1
-        ' Punta all ultimo byte del sotto-chunk s
         addr         = subBase + (600 * s) + 599
         gWaveBase(0) = addr / 256
         gWaveBase(1) = addr AND $FF
@@ -222,10 +222,9 @@ END PROC
 '   255 = RND forward o reverse a runtime
 '
 ' stutterMode: vedi globals.bas
-' Con la normalizzazione a 1/16, lo stutter lavora su sotto-chunk da
-' 600/reps campioni se reps>1. Il div effettivo passato a play_note e
-' chunkDiv*reps, ma i campioni per chiamata ASM restano 600/reps.
-' Nota: stutter con reps > 16/chunkDiv non e supportato (subCount<1).
+' Con stutter reps>1, newDiv = chunkDiv*reps puo superare 16.
+' In quel caso play_note/play_note_rev cappano subCount a 1:
+' ogni ripetizione emette 600 campioni (1/16 di battuta).
 ' =============================================================================
 PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE, reverseMode AS BYTE]
     DIM doRev       AS BYTE
