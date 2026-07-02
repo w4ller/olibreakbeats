@@ -197,14 +197,20 @@ let currentPat=0;
 // =============================================================================
 // AUDIO ENGINE
 //
-// MO6 stutter behaviour (mirrors ASM loop in patterns.bas):
-//   chunkSz  = bufLen / div          (original chunk size)
-//   off      = chunkSz * actualIdx   (FIXED for all reps — same chunk repeated)
-//   subSz    = chunkSz / reps        (each rep plays 1/reps of the chunk)
-//   Each rep reads subSz samples from off..off+subSz, with evolving pitch.
-//   Total duration = chunkSz samples = same as no-stutter.
+// Specchia esattamente play_note_ex in player.bas (fix stutter):
 //
-// resampleChunk: output is always exactly n frames (fixed wall-clock duration).
+//   reps=1  (no stutter):
+//     chunkSz = bufLen / div
+//     off     = chunkSz * actualIdx
+//     Suona intero chunk da off con pitch stepHi.stepLo
+//
+//   reps>1  (stutter):
+//     subSz   = chunkSz / reps        (dimensione sotto-chunk)
+//     baseOff = subSz * (actualIdx * reps)   (= chunkSz * actualIdx)
+//     rep r   → legge da baseOff + subSz*r   (sotto-chunk avanzante)
+//     pitch evolve ad ogni rep tramite delta 8.8 fixed-point
+//     Durata totale = reps * subSz = chunkSz (invariata)
+//
 // =============================================================================
 let audioCtx=null, audioBuffers={}, masterGain=null, analyser=null, vuFrameId=null;
 const audioStatus=document.getElementById('audio-status');
@@ -231,8 +237,8 @@ async function initAudio(){
 }
 
 // ---------------------------------------------------------------------------
-// resampleChunk — pitch-shift with FIXED output duration
-// output = always n frames; source window clamped, remainder zero-padded
+// resampleChunk — pitch-shift con durata output fissa
+// output = esattamente n frame; sorgente clampata, resto zero-padded
 // ---------------------------------------------------------------------------
 function resampleChunk(buf, offset, n, rate, reverse){
   if(n <= 0) return null;
@@ -300,37 +306,39 @@ function playNoteEx(row){
     ? Math.floor(Math.random()*div)
     : Math.min(row.idx, div-1);
 
-  // chunkSz: size of the full chunk on the div grid (same as no-stutter)
+  // chunkSz: dimensione del chunk sul grid div (uguale al caso no-stutter)
   const chunkSz = Math.floor(rawBuf.length / div);
-  // off: START of this chunk — FIXED for all reps (same chunk repeated)
-  const off     = chunkSz * actualIdx;
 
   const t0 = audioCtx.currentTime;
   let t = t0, totalSec = 0;
 
   if(reps === 1){
-    // no stutter — play whole chunk once
+    // no stutter — suona il chunk intero una volta
+    const off   = chunkSz * actualIdx;
     const slice = resampleChunk(rawBuf, off, chunkSz, row.stepHi + row.stepLo/256, doRev);
     totalSec    = scheduleBuffer(slice, t);
 
   } else {
-    // stutter — divide chunkSz into reps equal sub-slices,
-    // each reads from the SAME offset (start of the chunk),
-    // with evolving pitch. Total duration = chunkSz (unchanged).
-    const subSz = Math.floor(chunkSz / reps);
-    const dHi   = STUTTER_DELTA_HI[sm];
-    const dLo   = STUTTER_DELTA_LO[sm];
-    let curHi   = row.stepHi, curLo = row.stepLo;
+    // stutter — specchia play_note_ex in player.bas:
+    //   subSz   = chunkSz / reps
+    //   baseOff = subSz * actualIdx * reps  (= chunkSz * actualIdx)
+    //   rep r   → offset = baseOff + subSz * r  (sotto-chunk avanzante)
+    //   pitch evolve tramite delta 8.8 fixed-point ad ogni rep
+    const subSz   = Math.floor(chunkSz / reps);
+    const baseOff = subSz * actualIdx * reps;   // = chunkSz * actualIdx
+    const dHi     = STUTTER_DELTA_HI[sm];
+    const dLo     = STUTTER_DELTA_LO[sm];
+    let curHi     = row.stepHi, curLo = row.stepLo;
 
     for(let r=0; r<reps; r++){
       const rate  = curHi + curLo/256;
-      // Each rep starts at 'off' (same chunk), reads subSz frames at 'rate'
+      const off   = baseOff + subSz * r;        // sotto-chunk avanzante
       const slice = resampleChunk(rawBuf, off, subSz, rate, doRev);
       const dur   = scheduleBuffer(slice, t);
       t        += dur;
       totalSec += dur;
 
-      // 8.8 × 8.8 fixed-point multiply (mirrors ASM MULW)
+      // moltiplicazione 8.8 × 8.8 fixed-point (specchia ASM MULW)
       const iCur = (curHi<<8)|curLo;
       const iDel = (dHi<<8)|dLo;
       const prod = (Math.imul(iCur, iDel) >>> 0) >>> 8;
@@ -633,7 +641,8 @@ function tick(){
   const reps    = STUTTER_REPS[smDisp]||1;
   const rawBuf  = audioBuffers[row.waveId===0xFF ? 0 : row.waveId];
   const chunkSz = rawBuf ? Math.floor(rawBuf.length / row.div) : 0;
-  const subSzMs = rawBuf ? Math.round((chunkSz/reps)/rawBuf.sampleRate*1000) : 0;
+  const subSz   = reps > 1 ? Math.floor(chunkSz / reps) : chunkSz;
+  const subSzMs = rawBuf ? Math.round(subSz/rawBuf.sampleRate*1000) : 0;
 
   playProgress.style.width=((ri+1)/rows.length*100).toFixed(0)+'%';
   playStatus.textContent='▶  '+patterns[playPatIdx].name+'  — loop';
