@@ -69,10 +69,10 @@ PROCEDURE play_pattern
         prob = gRow(7)
 
         IF prob = 255 THEN
-            play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
+            play_note_unified[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
         ELSE IF prob > 0 THEN
             IF RND(256) <= prob THEN
-                play_note_ex[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
+                play_note_unified[gRow(1), gRow(0), gRow(2), gRow(3), gRow(4), gRow(5), gRow(6)]
             ENDIF
         ENDIF
 

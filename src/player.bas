@@ -1,76 +1,63 @@
-' =============================================================================
-' PLAY_CHUNK_ASM
-' Outputs gChunkSize samples from gWaveBase at 8.8 fixed-point step.
-' Legge dalla fine del BANK corrente (settato da gWavBank).
-' Timing loop: ~125us per sample = ~8kHz.
-' Bank is restored to 7 after playback.
-' =============================================================================
-PROC play_chunk_asm
-    ON CPU6809 BEGIN ASM
-        LDX   _gWaveBase
-        LDY   _gChunkSize
-        CLR   _gFracAcc
+' Parametri per play_chunk_atomic (oltre a quelli esistenti)
+DIM gReps(1) AS BYTE FOR BANK READ : GLOBAL gReps      :' 1..4, numero sotto-ripetizioni stutter
+DIM gDeltaHi(1) AS BYTE FOR BANK READ : GLOBAL gDeltaHi    :' delta pitch per sotto-ripetizione
+DIM gDeltaLo(1) AS BYTE FOR BANK READ : GLOBAL gDeltaLo
+DIM gSubSize(1) AS WORD FOR BANK READ : GLOBAL gSubSize    :' 300/reps, dimensione sotto-chunk in sample
+DIM gDoRev(1) AS BYTE FOR BANK READ : GLOBAL gDoRev
+DIM chunkMin AS INT : GLOBAL chunkMin
+DIM tmpReps(1) AS BYTE FOR BANK READ : GLOBAL tmpReps
+chunkMin = 300
 
+' =============================================================================
+' PLAY_CHUNK_ATOMIC
+' Suona sempre 300 sample (1/32), suddivisi in gReps sotto-blocchi (1..4)
+' con pitch shift incrementale via gDeltaHi/gDeltaLo.
+' Costo in cicli IDENTICO per gReps=1,2,3,4 (padding su reps basso).
+' Forward/reverse selezionato da gDoRev.
+' =============================================================================
+PROC play_chunk_atomic
+    ON CPU6809 BEGIN ASM
         LDA   _gWavBank
         STA   $A7E5
 
-PCH_LOOP:
+        LDA   _gReps
+        STA   _tmpReps          ; contatore sotto-blocchi rimanenti
+
+        LDX   _gWaveBase       ; forward: X punta all inizio
+        LDU   _gWaveBase       ; reverse: U punta allo stesso indirizzo iniziale
+                                ; (uno dei due sara usato in base a gDoRev)
+
+REP_LOOP:
+        LDY   _gSubSize         ; sample nel sotto-blocco corrente
+        CLR   _gFracAcc
+
+        LDA   _gDoRev
+        BNE   SUB_REV
+
+SUB_FWD:
         LDA   0,X
         STA   $A7CD
-
         LDB   #24
-PCH_DLY:
+SF_DLY:
         DECB
-        BNE   PCH_DLY
-
+        BNE   SF_DLY
         LDB   _gFracAcc
         ADDB  _gStepLo
         STB   _gFracAcc
         LDB   _gStepHi
         ADCB  #0
         ABX
-
         LEAY  -1,Y
-        BNE   PCH_LOOP
+        BNE   SUB_FWD
+        BRA   AFTER_SUB
 
-        LDA   #7
-        STA   $A7E5
-    END ASM ON CPU6809
-END PROC
-
-
-' =============================================================================
-' PLAY_CHUNK_ASM_REV
-' Come play_chunk_asm ma legge il chunk al contrario.
-' gWaveBase deve puntare all ULTIMO byte del chunk (non al primo).
-' Step e' POSITIVO (non negato): la routine lo sottrae tramite NEGA+LEAU.
-'
-' Tecnica decremento:
-'   ABX usa ACCB come UNSIGNED -> non puo fare decremento.
-'   LEAU A,U usa A come SIGNED 8-bit -> NEGA + LEAU A,U decrementa.
-'   Es: step=1.0 -> A=1 -> NEGA -> A=$FF (-1) -> LEAU A,U -> U-=1. Corretto.
-'
-' Registro U usato come puntatore (X resta libero per ugBasic).
-' Overhead vs play_chunk_asm: +2 cicli/sample (NEGA) = ~5% su 8kHz.
-' =============================================================================
-PROC play_chunk_asm_rev
-    ON CPU6809 BEGIN ASM
-        LDU   _gWaveBase
-        LDY   _gChunkSize
-        CLR   _gFracAcc
-
-        LDA   _gWavBank
-        STA   $A7E5
-
-PCR_LOOP:
+SUB_REV:
         LDA   0,U
         STA   $A7CD
-
         LDB   #24
-PCR_DLY:
+SR_DLY:
         DECB
-        BNE   PCR_DLY
-
+        BNE   SR_DLY
         LDB   _gFracAcc
         ADDB  _gStepLo
         STB   _gFracAcc
@@ -78,28 +65,42 @@ PCR_DLY:
         ADCA  #0
         NEGA
         LEAU  A,U
-
         LEAY  -1,Y
-        BNE   PCR_LOOP
+        BNE   SUB_REV
+
+AFTER_SUB:
+        ; aggiorna pitch per prossimo sotto-blocco (shift-add, NON moltiplicazione BASIC)
+        LDA   _gStepHi
+        LDB   _gStepLo
+        ; product = step + delta (approssimazione lineare accumulata)
+        ADDB  _gDeltaLo
+        ADCA  _gDeltaHi
+        STA   _gStepHi
+        STB   _gStepLo
+
+        DEC   _tmpReps
+        BNE   REP_LOOP
 
         LDA   #7
         STA   $A7E5
+        RTS
     END ASM ON CPU6809
 END PROC
 
-
 ' =============================================================================
-' PLAY_NOTE  [chunkIdx, chunkDiv, stepHi, stepLo, waveId]
-' chunkIdx = $FF -> random chunk in 0..chunkDiv-1
-' chunkDiv = number of equal slices the wave is divided into
-' stepHi/Lo = 8.8 fixed-point pitch multiplier
-' waveId   = 0..4 selects wave; $FF = random among 5 waves
+' PLAY_NOTE_UNIFIED [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode, reverseMode]
+' Setup fatto in BASIC UNA SOLA VOLTA per nota (non introduce jitter cumulativo),
+' poi loop dei mini-chunk da 300 sample tutto delegato ad ASM.
 ' =============================================================================
-PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
+PROCEDURE play_note_unified[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE, reverseMode AS BYTE]
+    DIM wId AS BYTE
     DIM actualIdx AS BYTE
-    DIM addr      AS ADDRESS
-    DIM sz        AS INTEGER
-    DIM wId       AS BYTE
+    DIM sm AS BYTE
+    DIM reps AS BYTE
+    DIM addr AS ADDRESS
+    DIM chunkSizeInSamples AS INTEGER
+    DIM nMinimalChunks AS BYTE
+    DIM i AS BYTE
 
     IF waveId = $FF THEN
         wId = RND(5)
@@ -112,90 +113,11 @@ PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo A
     ELSE
         actualIdx = chunkIdx
     ENDIF
-
-    sz            = 9600 / chunkDiv
-    gChunkSize(0) = sz / 256
-    gChunkSize(1) = sz AND $FF
-    addr          = waveAddress(wId) + (sz * actualIdx)
-    gWaveBase(0)  = addr / 256
-    gWaveBase(1)  = addr AND $FF
-    gWavBank(0)   = wavBank(wId)
-    gStepHi(0)    = stepHi
-    gStepLo(0)    = stepLo
-    CALL play_chunk_asm
-END PROC
-
-
-' =============================================================================
-' PLAY_NOTE_REV  [chunkIdx, chunkDiv, stepHi, stepLo, waveId]
-' Come play_note ma suona il chunk al contrario tramite play_chunk_asm_rev.
-' Step passato POSITIVO (non negato): e play_chunk_asm_rev che lo inverte.
-' gWaveBase punta all ultimo byte del chunk.
-' =============================================================================
-PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
-    DIM actualIdx AS BYTE
-    DIM addr      AS ADDRESS
-    DIM sz        AS INTEGER
-    DIM wId       AS BYTE
-
-    IF waveId = $FF THEN
-        wId = RND(5)
-    ELSE
-        wId = waveId
-    ENDIF
-
-    IF chunkIdx = $FF THEN
-        actualIdx = RND(chunkDiv)
-    ELSE
-        actualIdx = chunkIdx
-    ENDIF
-
-    sz = 9600 / chunkDiv
-
-    ' Punta all ultimo byte del chunk
-    addr         = waveAddress(wId) + (sz * actualIdx) + sz - 1
-    gWaveBase(0) = addr / 256
-    gWaveBase(1) = addr AND $FF
-    gWavBank(0)  = wavBank(wId)
-
-    gChunkSize(0) = sz / 256
-    gChunkSize(1) = sz AND $FF
-
-    ' Step positivo: e play_chunk_asm_rev che lo usa negato via NEGA+LEAU
-    gStepHi(0) = stepHi
-    gStepLo(0) = stepLo
-    CALL play_chunk_asm_rev
-END PROC
-
-
-' =============================================================================
-' PLAY_NOTE_EX  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode, reverseMode]
-' Wrapper unico che combina reverse e stutter.
-'
-' reverseMode:
-'   0   = forward (default, backward compatible)
-'   1   = reverse
-'   255 = RND forward o reverse a runtime
-'
-' stutterMode: vedi play_note_stutter / globals.bas
-' =============================================================================
-PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE, reverseMode AS BYTE]
-    DIM doRev   AS BYTE
-    DIM sm      AS BYTE
-    DIM r       AS BYTE
-    DIM newDiv  AS BYTE
-    DIM baseIdx AS BYTE
-    DIM reps    AS BYTE
-    DIM curHi   AS BYTE
-    DIM curLo   AS BYTE
-    DIM product AS INTEGER
-    DIM dHi     AS BYTE
-    DIM dLo     AS BYTE
 
     IF reverseMode = $FF THEN
-        doRev = RND(2)  :' 0=forward, 1=reverse
+        gDoRev(0) = RND(2)
     ELSE
-        doRev = reverseMode
+        gDoRev(0) = reverseMode
     ENDIF
 
     IF stutterMode = $FF THEN
@@ -213,46 +135,38 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
     ENDIF
 
     reps = stutterReps(sm)
+    gReps(0) = reps
+    gDeltaHi(0) = stutterDeltaHi(sm)
+    gDeltaLo(0) = stutterDeltaLo(sm)
 
-    IF reps = 1 THEN
-        IF doRev = 0 THEN
-            play_note[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
-        ELSE
-            play_note_rev[chunkIdx, chunkDiv, stepHi, stepLo, waveId]
-        ENDIF
-    ELSE
-        newDiv = chunkDiv * reps
+    gStepHi(0) = stepHi
+    gStepLo(0) = stepLo
+    gWavBank(0) = wavBank(wId)
 
-        IF chunkIdx = $FF THEN
-            baseIdx = RND(chunkDiv) * reps
-        ELSE
-            baseIdx = chunkIdx * reps
-        ENDIF
+    chunkSizeInSamples = 9600 / chunkDiv
+    gSubSize(0) = (chunkSizeInSamples / chunkMin) : ' quanti mini-chunk da 300
+    nMinimalChunks = chunkSizeInSamples / chunkMin
 
-        curHi = stepHi
-        curLo = stepLo
-        dHi   = stutterDeltaHi(sm)
-        dLo   = stutterDeltaLo(sm)
-
-        FOR r = 0 TO reps - 1
-            IF doRev = 0 THEN
-                play_note[baseIdx, newDiv, curHi, curLo, waveId]
-            ELSE
-                play_note_rev[baseIdx, newDiv, curHi, curLo, waveId]
-            ENDIF
-            product = (curHi * dHi * 256) + (curHi * dLo) + (curLo * dHi)
-            curHi = product / 256
-            curLo = product AND $FF
-        NEXT r
+    addr = waveAddress(wId) + (actualIdx * chunkSizeInSamples)
+    IF gDoRev(0) = 1 THEN
+        addr = addr + chunkSizeInSamples - 1
     ENDIF
 
-END PROC
+    FOR i = 0 TO nMinimalChunks - 1
+        IF gDoRev(0) = 0 THEN
+            gWaveBase(0) = (addr + (i * chunkMin)) / 256
+            gWaveBase(1) = (addr + (i * chunkMin)) AND $FF
+        ELSE
+            gWaveBase(0) = (addr - (i * chunkMin)) / 256
+            gWaveBase(1) = (addr - (i * chunkMin)) AND $FF
+        ENDIF
 
+        gSubSize(0) = chunkMin / reps
+        CALL play_chunk_atomic
 
-' =============================================================================
-' PLAY_NOTE_STUTTER  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode]
-' Backward compatible: chiama play_note_ex con reverseMode=0.
-' =============================================================================
-PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
-    play_note_ex[chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode, 0]
+        CALL check_key
+        IF gModeStop = 1 OR gPatChanged = 1 THEN
+            EXIT PROC
+        ENDIF
+    NEXT i
 END PROC

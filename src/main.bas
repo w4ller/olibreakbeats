@@ -10,9 +10,11 @@
 
 INCLUDE "src/globals.bas"
 INCLUDE "src/dac.bas"
-INCLUDE "src/player.bas"
-INCLUDE "src/patterns.bas"
+
 INCLUDE "src/input.bas"
+INCLUDE "src/player.bas"
+
+INCLUDE "src/patterns.bas"
 
 CALL init_dac
 CALL init_waves
