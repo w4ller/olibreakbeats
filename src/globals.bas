@@ -38,17 +38,15 @@ wave  := LOAD("assets/amen150.bin") BANKED
 GLOBAL wave2
 wave2 := LOAD("assets/chords.bin") BANKED
 GLOBAL wave3
-wave3 := LOAD("assets/reverse.bin") BANKED
+wave3 := LOAD("assets/606.bin") BANKED
 GLOBAL wave4
 wave4 := LOAD("assets/future.bin") BANKED
-GLOBAL wave5
-wave5 := LOAD("assets/606.bin") BANKED
 
 GLOBAL patFile
 patFile := LOAD("assets/patterns.bin") BANKED
 
 ' --- Wave lookup tables (precalculated by init_waves) ---
-DIM waveAddress(5) AS WORD : GLOBAL waveAddress  :' base address of each wave
+DIM waveAddress(4) AS WORD : GLOBAL waveAddress  :' base address of each wave
 DIM wavBank(5)     AS BYTE : GLOBAL wavBank      :' bank number of each wave
 
 ' --- WAV player ASM interface (below $6000, safe from bank swap) ---
@@ -58,6 +56,9 @@ DIM gStepHi    (1) AS BYTE FOR BANK READ : GLOBAL gStepHi
 DIM gStepLo    (1) AS BYTE FOR BANK READ : GLOBAL gStepLo
 DIM gFracAcc   (1) AS BYTE FOR BANK READ : GLOBAL gFracAcc
 DIM gWavBank   (1) AS BYTE FOR BANK READ : GLOBAL gWavBank
+
+DIM gMinChunkSize AS INTEGER: GLOBAL gMinChunkSize
+gMinChunkSize = 600
 
 ' --- Total pattern count (set by init_patterns) ---
 DIM gNPat      (1) AS BYTE : GLOBAL gNPat   :' number of patterns in the file
@@ -92,7 +93,7 @@ PROCEDURE init_waves
     waveAddress(1) = VARBANKPTR(wave2) : wavBank(1) = VARBANK(wave2)
     waveAddress(2) = VARBANKPTR(wave3) : wavBank(2) = VARBANK(wave3)
     waveAddress(3) = VARBANKPTR(wave4) : wavBank(3) = VARBANK(wave4)
-    waveAddress(4) = VARBANKPTR(wave5) : wavBank(4) = VARBANK(wave5)
+   ' waveAddress(4) = VARBANKPTR(wave5) : wavBank(4) = VARBANK(wave5)
 END PROC
 
 

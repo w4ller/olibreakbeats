@@ -9,7 +9,8 @@
 ' =============================================================================
 CLS
 
-INCLUDE "src/globals.bas"
+INCLUDE "src/globals.bas"   
+INCLUDE "src/player_asm.bas"
 INCLUDE "src/dac.bas"
 INCLUDE "src/player.bas"
 INCLUDE "src/input.bas"

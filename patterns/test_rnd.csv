@@ -3,5 +3,7 @@
 #
 # idx=255 = RND: il player sceglie un chunk casuale tra 0..div-1 a runtime
 #
-pattern,div,idx,semi
-1,8,255,0
+pattern,div,idx,semi,wave,stutter,reverse,prob
+1,2,0,0,0,0,1,255
+1,2,1,0,0,0,1,255
+2,16,255,0,255,0,255,255
