@@ -35,14 +35,14 @@ END PROC
 ' =============================================================================
 PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE]
     DIM actualIdx AS BYTE
-    DIM addr      AS ADDRESS
-    DIM sz        AS INTEGER
-    DIM wId       AS BYTE
-    DIM reps      AS BYTE
-    DIM r         AS BYTE
+    DIM addr AS ADDRESS
+    DIM sz AS INTEGER
+    DIM wId AS BYTE
+    DIM reps AS BYTE
+    DIM r AS BYTE
 
     IF waveId = $FF THEN
-        wId = RND(5)
+        wId = RND(4)
     ELSE
         wId = waveId
     ENDIF
@@ -53,12 +53,12 @@ PROCEDURE play_note[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo A
         actualIdx = chunkIdx
     ENDIF
 
-    sz   = 9600 / chunkDiv
+    sz = 9600 / chunkDiv
     addr = waveAddress(wId) + (sz * actualIdx)
 
-    gWavBank(0)   = wavBank(wId)
-    gStepHi(0)    = stepHi
-    gStepLo(0)    = stepLo
+    gWavBank(0) = wavBank(wId)
+    gStepHi(0) = stepHi
+    gStepLo(0) = stepLo
     gChunkSize(0) = gMinChunkSize / 256
     gChunkSize(1) = gMinChunkSize AND $FF
 
@@ -87,7 +87,7 @@ PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, step
     DIM reps      AS BYTE
 
     IF waveId = $FF THEN
-        wId = RND(5)
+        wId = RND(4)
     ELSE
         wId = waveId
     ENDIF
@@ -124,43 +124,93 @@ PROCEDURE play_note_rev[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, step
 END PROC
 
 ' =============================================================================
+' PLAY_SUBCHUNK
+' Suona un subchunk arbitrario via player ASM.
+' addr      = indirizzo di inizio subchunk (forward) oppure ultimo byte (reverse)
+' size      = lunghezza del subchunk in sample
+' stepHi/Lo = step 8.8
+' bankId    = bank wave
+' doRev     = 0 forward, 1 reverse
+' =============================================================================
+PROCEDURE play_subchunk[addr AS ADDRESS, size AS INTEGER, stepHi AS BYTE, stepLo AS BYTE, bankId AS BYTE, doRev AS BYTE]
+    gWavBank(0) = bankId
+
+    gWaveBase(0) = addr / 256
+    gWaveBase(1) = addr AND $FF
+
+    gChunkSize(0) = size / 256
+    gChunkSize(1) = size AND $FF
+
+    gStepHi(0) = stepHi
+    gStepLo(0) = stepLo
+
+    IF doRev = 0 THEN
+        CALL play_chunk_asm
+    ELSE
+        CALL play_chunk_asm_rev
+    ENDIF
+END PROC
+
+
+' =============================================================================
 ' PLAY_NOTE_EX  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode, reverseMode]
 ' Wrapper unico che combina reverse e stutter.
 '
 ' reverseMode:
-'   0   = forward (default, backward compatible)
+'   0   = forward
 '   1   = reverse
-'   255 = RND forward o reverse a runtime
+'   $FF = random forward/reverse
 '
-' stutterMode: vedi play_note_stutter / globals.bas
+' stutterMode:
+'   00..0B = usa le tabelle globali stutterReps / stutterDeltaHi / stutterDeltaLo
+'   $FF    = random 0..11
+'
+' Logica:
+'   - il chunk selezionato viene sempre ridotto al chunk minimo (gMinChunkSize)
+'   - se c'è stutter, il chunk minimo viene diviso in reps slice
+'   - ogni slice viene suonata separatamente dal player ASM
 ' =============================================================================
 PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE, reverseMode AS BYTE]
-    DIM doRev       AS BYTE
-    DIM sm          AS BYTE
-    DIM r           AS BYTE
-    DIM newDiv      AS BYTE
-    DIM baseIdx     AS BYTE
-    DIM reps        AS BYTE
-    DIM curHi       AS BYTE
-    DIM curLo       AS BYTE
-    DIM product     AS INTEGER
-    DIM dHi         AS BYTE
-    DIM dLo         AS BYTE
-    DIM adjustedHi  AS BYTE
-    DIM adjustedLo  AS BYTE
+    DIM doRev AS BYTE
+    DIM sm AS BYTE
+    DIM reps AS BYTE
+    DIM r AS BYTE
+
+    DIM actualIdx AS BYTE
+    DIM wId AS BYTE
+
+    DIM sz AS INTEGER
+    DIM targetSize AS INTEGER
+    DIM subSize AS INTEGER
+
+    DIM baseAddr AS ADDRESS
+    DIM playAddr AS ADDRESS
+
+    DIM curHi AS BYTE
+    DIM curLo AS BYTE
+    DIM dHi AS BYTE
+    DIM dLo AS BYTE
+
+    DIM adjustedHi AS BYTE
+    DIM adjustedLo AS BYTE
     DIM tempProduct AS INTEGER
+    DIM product AS INTEGER
+    DIM fracCarry AS INTEGER
 
+    IF waveId = $FF THEN
+        wId = RND(4)
+    ELSE
+        wId = waveId
+    ENDIF
 
- ' --- Compensa lo step per il tempo corrente ---
-    ' step_compensato = step * (128 / gTempoFactor)
-    ' Per mantenere il pitch quando il tempo cambia
-    tempProduct = (stepHi * 256 + stepLo) * 128 / gTempoFactor
-    adjustedHi = tempProduct / 256
-    adjustedLo = tempProduct AND $FF
-
+    IF chunkIdx = $FF THEN
+        actualIdx = RND(chunkDiv)
+    ELSE
+        actualIdx = chunkIdx
+    ENDIF
 
     IF reverseMode = $FF THEN
-        doRev = RND(2)  :' 0=forward, 1=reverse
+        doRev = RND(2)
     ELSE
         doRev = reverseMode
     ENDIF
@@ -179,46 +229,50 @@ PROCEDURE play_note_ex[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepL
         sm = stutterMode
     ENDIF
 
+    tempProduct = (stepHi * 256 + stepLo) * 128 / gTempoFactor
+    adjustedHi = tempProduct / 256
+    adjustedLo = tempProduct AND $FF
+
     reps = stutterReps(sm)
 
     IF reps = 1 THEN
         IF doRev = 0 THEN
-            play_note[chunkIdx, chunkDiv, adjustedHi, adjustedLo, waveId]
+            play_note[actualIdx, chunkDiv, adjustedHi, adjustedLo, wId]
         ELSE
-            play_note_rev[chunkIdx, chunkDiv, adjustedHi, adjustedLo, waveId]
+            play_note_rev[actualIdx, chunkDiv, adjustedHi, adjustedLo, wId]
         ENDIF
     ELSE
-        ' ... usa adjustedHi/Lo nel loop stutter ...
-        curHi = adjustedHi
-        curLo = adjustedLo
-        newDiv = chunkDiv * reps
+        sz = 9600 / chunkDiv
+        baseAddr = waveAddress(wId) + (sz * actualIdx)
 
-        IF chunkIdx = $FF THEN
-            baseIdx = RND(chunkDiv) * reps
+        targetSize = sz / reps
+        IF targetSize >= gMinChunkSize THEN
+            subSize = gMinChunkSize
         ELSE
-            baseIdx = chunkIdx * reps
+            subSize = targetSize
         ENDIF
 
-        curHi = stepHi
-        curLo = stepLo
-        dHi   = stutterDeltaHi(sm)
-        dLo   = stutterDeltaLo(sm)
+        curHi = adjustedHi
+        curLo = adjustedLo
+        dHi = stutterDeltaHi(sm)
+        dLo = stutterDeltaLo(sm)
 
         FOR r = 0 TO reps - 1
             IF doRev = 0 THEN
-                play_note[baseIdx, newDiv, curHi, curLo, waveId]
+                playAddr = baseAddr
+                CALL play_subchunk[playAddr, subSize, curHi, curLo, wavBank(wId), 0]
             ELSE
-                play_note_rev[baseIdx, newDiv, curHi, curLo, waveId]
+                playAddr = baseAddr + sz - 1 
+                CALL play_subchunk[playAddr, subSize, curHi, curLo, wavBank(wId), 1]
             ENDIF
-            product = (curHi * dHi * 256) + (curHi * dLo) + (curLo * dHi)
+
+            fracCarry = (curLo * dLo) / 256
+            product = (curHi * dHi * 256) + (curHi * dLo) + (curLo * dHi) + fracCarry
             curHi = product / 256
             curLo = product AND $FF
         NEXT r
     ENDIF
-
 END PROC
-
-
 ' =============================================================================
 ' PLAY_NOTE_STUTTER  [chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode]
 ' Backward compatible: chiama play_note_ex con reverseMode=0.
@@ -226,3 +280,4 @@ END PROC
 PROCEDURE play_note_stutter[chunkIdx AS BYTE, chunkDiv AS BYTE, stepHi AS BYTE, stepLo AS BYTE, waveId AS BYTE, stutterMode AS BYTE]
     play_note_ex[chunkIdx, chunkDiv, stepHi, stepLo, waveId, stutterMode, 0]
 END PROC
+
